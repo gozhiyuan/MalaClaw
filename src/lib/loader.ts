@@ -16,6 +16,7 @@ import {
   resolvePacksDir,
   resolveManifestPath,
   resolveLockfilePath,
+  resolveOverlayTemplatesDir,
 } from "./paths.js";
 
 async function readYaml<T>(filePath: string): Promise<T> {
@@ -35,8 +36,15 @@ async function fileExists(filePath: string): Promise<boolean> {
 // ── Agent templates ──────────────────────────────────────────────────────────
 
 export async function loadAgent(agentId: string): Promise<AgentDef> {
-  const dir = resolveAgentTemplatesDir();
-  const filePath = path.join(dir, `${agentId}.yaml`);
+  const overlay = resolveOverlayTemplatesDir();
+  if (overlay) {
+    const overlayPath = path.join(overlay, "agents", `${agentId}.yaml`);
+    if (await fileExists(overlayPath)) {
+      const raw = await readYaml<unknown>(overlayPath);
+      return AgentDef.parse(raw);
+    }
+  }
+  const filePath = path.join(resolveAgentTemplatesDir(), `${agentId}.yaml`);
   const raw = await readYaml<unknown>(filePath);
   return AgentDef.parse(raw);
 }
@@ -61,8 +69,15 @@ export async function loadAllAgents(): Promise<AgentDef[]> {
 // ── Team templates ───────────────────────────────────────────────────────────
 
 export async function loadTeam(teamId: string): Promise<TeamDef> {
-  const dir = resolveTeamTemplatesDir();
-  const filePath = path.join(dir, `${teamId}.yaml`);
+  const overlay = resolveOverlayTemplatesDir();
+  if (overlay) {
+    const overlayPath = path.join(overlay, "teams", `${teamId}.yaml`);
+    if (await fileExists(overlayPath)) {
+      const raw = await readYaml<unknown>(overlayPath);
+      return TeamDef.parse(raw);
+    }
+  }
+  const filePath = path.join(resolveTeamTemplatesDir(), `${teamId}.yaml`);
   const raw = await readYaml<unknown>(filePath);
   return TeamDef.parse(raw);
 }
@@ -87,8 +102,15 @@ export async function loadAllTeams(): Promise<TeamDef[]> {
 // ── Skill templates ──────────────────────────────────────────────────────────
 
 export async function loadSkill(skillId: string): Promise<SkillEntry> {
-  const dir = resolveSkillTemplatesDir();
-  const filePath = path.join(dir, `${skillId}.yaml`);
+  const overlay = resolveOverlayTemplatesDir();
+  if (overlay) {
+    const overlayPath = path.join(overlay, "skills", `${skillId}.yaml`);
+    if (await fileExists(overlayPath)) {
+      const raw = await readYaml<unknown>(overlayPath);
+      return SkillEntry.parse(raw);
+    }
+  }
+  const filePath = path.join(resolveSkillTemplatesDir(), `${skillId}.yaml`);
   const raw = await readYaml<unknown>(filePath);
   return SkillEntry.parse(raw);
 }
@@ -113,8 +135,15 @@ export async function loadAllSkills(): Promise<SkillEntry[]> {
 // ── Pack definitions ─────────────────────────────────────────────────────────
 
 export async function loadPack(packId: string): Promise<PackDef> {
-  const dir = resolvePacksDir();
-  const filePath = path.join(dir, `${packId}.yaml`);
+  const overlay = resolveOverlayTemplatesDir();
+  if (overlay) {
+    const overlayPath = path.join(overlay, "packs", `${packId}.yaml`);
+    if (await fileExists(overlayPath)) {
+      const raw = await readYaml<unknown>(overlayPath);
+      return PackDef.parse(raw);
+    }
+  }
+  const filePath = path.join(resolvePacksDir(), `${packId}.yaml`);
   const raw = await readYaml<unknown>(filePath);
   return PackDef.parse(raw);
 }

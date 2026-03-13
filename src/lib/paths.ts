@@ -89,6 +89,17 @@ export function resolvePartialsDir(): string {
   return path.resolve(__dirname, "..", "..", "partials");
 }
 
+/** Custom templates overlay directory (via env var or project-local ./templates) */
+export function resolveOverlayTemplatesDir(): string | null {
+  const env = process.env.OPENCLAW_STORE_TEMPLATES?.trim();
+  if (env) return env;
+  // Check project-local ./templates (if it differs from bundled)
+  const local = path.join(process.cwd(), "templates");
+  // Don't treat the repo itself as an overlay
+  if (local !== resolveTemplatesRoot()) return local;
+  return null;
+}
+
 // ── OpenClaw agent dirs (agent/ entry used by OpenClaw) ─────────────────────
 
 /** The openclaw agent directory for a store-managed agent */
