@@ -173,7 +173,7 @@ Good for: open-ended tasks, solo agent with on-demand specialisation.
 ```bash
 # Setup
 openclaw-store init                          # Interactive wizard
-openclaw-store install [--dry-run] [--force] # Install from openclaw-store.yaml
+openclaw-store install [--dry-run] [--force] [--no-openclaw] # Install from openclaw-store.yaml
 openclaw-store install --pack dev-company    # One-shot install (no manifest needed)
 openclaw-store uninstall --pack dev-company  # Remove a pack
 openclaw-store uninstall --all               # Remove everything
@@ -194,6 +194,13 @@ openclaw-store skill check                   # Check which skills are active/ina
 
 openclaw-store project status                # Installation overview
 openclaw-store project kanban <team-id>      # Show team kanban board
+
+# Preview & validate
+openclaw-store diff                          # Show what would change vs lockfile
+openclaw-store validate                      # Validate all templates against schema
+
+# CI / Claude Code mode
+openclaw-store install --no-openclaw         # Install without patching openclaw.json
 
 # Health
 openclaw-store doctor                        # Full health check
@@ -226,7 +233,13 @@ cp templates/agents/pm.yaml local-agents/pm.yaml
 # edit local-agents/pm.yaml
 ```
 
-Then point the loader at your override (see [Customising Agents](#customising-agents) in the docs).
+Then point the loader at your local templates:
+
+```bash
+OPENCLAW_STORE_TEMPLATES=./local-agents openclaw-store install
+```
+
+Or set it permanently in your shell profile. The loader checks `OPENCLAW_STORE_TEMPLATES` first for each agent/team/skill, falling back to the bundled templates.
 
 ### Add a skill
 
@@ -379,10 +392,25 @@ disabled_until_configured: true
 
 ---
 
+## Development & Testing
+
+```bash
+npm test                    # Run all tests (vitest)
+npm run test:watch          # Watch mode
+npm run test:coverage       # With coverage report
+npm run build               # TypeScript compile
+openclaw-store validate     # Validate all bundled templates
+```
+
+---
+
 ## Troubleshooting
 
 **`openclaw.json not found`**
-OpenClaw isn't installed or `~/.openclaw/` doesn't exist yet. Install OpenClaw first.
+Either install OpenClaw first, or if you're running in CI/Claude Code without OpenClaw:
+```bash
+openclaw-store install --no-openclaw
+```
 
 **`[INACTIVE] last30days — missing: OPENAI_API_KEY`**
 Set the env var and re-run `openclaw-store install`. Skills degrade gracefully when optional vars are missing.

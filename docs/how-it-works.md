@@ -6,6 +6,21 @@ This document explains the technical architecture: data flow, file formats, the 
 
 ## Architecture Overview
 
+## What's New in v1.0.0
+
+| Feature | Description |
+|---|---|
+| `diff` command | Preview what `install` would change vs the current lockfile |
+| `validate` command | Validate all bundled templates against Zod schemas |
+| `--no-openclaw` flag | Install without patching `openclaw.json` (CI, Claude Code) |
+| Local overlay | Override any bundled template via `OPENCLAW_STORE_TEMPLATES` |
+| Multi-team packs | A single pack YAML can reference multiple teams |
+| Pack compatibility | `compatibility.node_min` / `openclaw_min` in pack YAML, checked by `doctor` |
+| Skill installation | Skills are cached at `~/.openclaw-store/cache/skills/` and symlinked per workspace |
+| Test suite | 23 vitest tests covering schema, renderer, resolver, overlay, compat, skill-fetch, diff |
+
+---
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                   openclaw-app-store                        │
@@ -256,7 +271,9 @@ my-project/                        ← git-committed
 │                   ├── tasks-log.md
 │                   └── ...
 └── cache/
-    └── packs/                     ← future: downloaded remote packs
+    ├── packs/                     ← future: downloaded remote packs
+    └── skills/                    ← skill cache (symlinked per agent workspace)
+        └── <skill-id>@<version>/
 
 ~/.openclaw/                       ← OpenClaw's own config (patched)
 ├── openclaw.json                  ← agents.list + tools.agentToAgent
@@ -377,7 +394,11 @@ The `removeBlock()` function strips the block cleanly on uninstall. This pattern
 The loader searches `templates/agents/<id>.yaml` for agent definitions. To override an agent without modifying the bundled templates, you can create a local overlay by either:
 
 1. Editing `templates/agents/<id>.yaml` directly (fine for personal forks)
-2. Setting `OPENCLAW_STORE_TEMPLATES` env var to point to a custom templates directory (planned for v2)
+2. Setting `OPENCLAW_STORE_TEMPLATES` env var to point to a custom templates directory:
+   ```bash
+   OPENCLAW_STORE_TEMPLATES=./my-templates openclaw-store install
+   ```
+   The loader checks the overlay for each agent/team/skill YAML before falling back to bundled templates.
 
 ### The `{{variable}}` substitution system
 
@@ -545,6 +566,10 @@ teams:                        # team IDs to install
   - string
 default_skills:               # auto-included skills
   - string
+compatibility:                # optional version requirements
+  openclaw_min: string        # minimum OpenClaw version (e.g. "2026.2.9")
+  openclaw_max: string        # exclusive upper bound (optional)
+  node_min: string            # minimum Node.js version (e.g. "22.0.0")
 ```
 
 ### Manifest (`openclaw-store.yaml`)
@@ -594,7 +619,7 @@ skills:
 | Feature | Where to add |
 |---|---|
 | Remote pack registry | `src/lib/resolver.ts` — add HTTP fetch before local lookup |
-| Custom templates directory | `src/lib/paths.ts` — check `OPENCLAW_STORE_TEMPLATES` env var |
+| Custom templates directory | ✅ Done — set `OPENCLAW_STORE_TEMPLATES` env var |
 | Claude Code adapter | `src/lib/adapters/claude-code.ts` — already stubbed |
 | Pack versioning + semver | `src/lib/resolver.ts` — extend `resolveManifest()` |
 | `openclaw-store update` | New command — re-resolve + diff lockfile |
