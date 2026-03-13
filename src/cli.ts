@@ -199,6 +199,16 @@ projectCmd
     await projectKanban(teamId);
   });
 
+// ── diff ─────────────────────────────────────────────────────────────────────
+
+program
+  .command("diff")
+  .description("Show what would change if you ran install against current lockfile")
+  .action(async () => {
+    const { runDiff } = await import("./commands/diff.js");
+    await runDiff();
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 
 program
