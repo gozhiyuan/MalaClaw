@@ -6,3 +6,6 @@ teams:
   - dev-company
 default_skills:
   - github
+compatibility:
+  openclaw_min: "2026.2.9"
+  node_min: "22.0.0"

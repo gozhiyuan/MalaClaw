@@ -6,3 +6,6 @@ teams:
   - content-factory
 default_skills:
   - last30days
+compatibility:
+  openclaw_min: "2026.2.9"
+  node_min: "22.0.0"

@@ -120,6 +120,28 @@ export async function runDoctor(autoFix: boolean = false): Promise<void> {
     }
   }
 
+  // Check 7: pack compatibility
+  if (lockfile) {
+    const { checkPackCompatibility } = await import("../lib/compat.js");
+    const { loadPack } = await import("../lib/loader.js");
+    const { PackDef } = await import("../lib/schema.js");
+    const installedPackIds = [...new Set((lockfile.packs ?? []).map((p) => p.id.split("__")[0]))];
+    const packDefs = await Promise.all(installedPackIds.map((id) =>
+      loadPack(id).catch(() => null)
+    ));
+    const validPacks = packDefs.filter((p): p is PackDef => p !== null);
+    const compatResult = await checkPackCompatibility(validPacks);
+    for (const e of compatResult.errors) {
+      findings.push({ severity: "error", message: e });
+    }
+    for (const w of compatResult.warnings) {
+      findings.push({ severity: "warning", message: w });
+    }
+    if (compatResult.ok && validPacks.length > 0) {
+      findings.push({ severity: "ok", message: "Pack compatibility OK" });
+    }
+  }
+
   // Print results
   console.log("\nopenclaww-store doctor\n");
   let hasErrors = false;

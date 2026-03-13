@@ -151,6 +151,13 @@ export const PackDef = z.object({
   description: z.string().optional(),
   teams: z.array(z.string()),
   default_skills: z.array(z.string()).optional(),
+  compatibility: z
+    .object({
+      openclaw_min: z.string().optional(),
+      openclaw_max: z.string().optional(),
+      node_min: z.string().optional(),
+    })
+    .optional(),
 });
 
 export type PackDef = z.infer<typeof PackDef>;
