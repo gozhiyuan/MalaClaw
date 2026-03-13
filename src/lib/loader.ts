@@ -33,6 +33,25 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function listYamlIds(dirs: string[]): Promise<string[]> {
+  const ids = new Set<string>();
+
+  for (const dir of dirs) {
+    try {
+      const entries = await fs.readdir(dir);
+      for (const entry of entries) {
+        if (entry.endsWith(".yaml")) {
+          ids.add(entry.replace(/\.yaml$/, ""));
+        }
+      }
+    } catch {
+      // ignore missing overlay directories
+    }
+  }
+
+  return [...ids].sort();
+}
+
 // ── Agent templates ──────────────────────────────────────────────────────────
 
 export async function loadAgent(agentId: string): Promise<AgentDef> {
@@ -50,15 +69,11 @@ export async function loadAgent(agentId: string): Promise<AgentDef> {
 }
 
 export async function listAgentIds(): Promise<string[]> {
-  const dir = resolveAgentTemplatesDir();
-  try {
-    const entries = await fs.readdir(dir);
-    return entries
-      .filter((e) => e.endsWith(".yaml"))
-      .map((e) => e.replace(/\.yaml$/, ""));
-  } catch {
-    return [];
-  }
+  const overlay = resolveOverlayTemplatesDir();
+  return listYamlIds([
+    ...(overlay ? [path.join(overlay, "agents")] : []),
+    resolveAgentTemplatesDir(),
+  ]);
 }
 
 export async function loadAllAgents(): Promise<AgentDef[]> {
@@ -83,15 +98,11 @@ export async function loadTeam(teamId: string): Promise<TeamDef> {
 }
 
 export async function listTeamIds(): Promise<string[]> {
-  const dir = resolveTeamTemplatesDir();
-  try {
-    const entries = await fs.readdir(dir);
-    return entries
-      .filter((e) => e.endsWith(".yaml"))
-      .map((e) => e.replace(/\.yaml$/, ""));
-  } catch {
-    return [];
-  }
+  const overlay = resolveOverlayTemplatesDir();
+  return listYamlIds([
+    ...(overlay ? [path.join(overlay, "teams")] : []),
+    resolveTeamTemplatesDir(),
+  ]);
 }
 
 export async function loadAllTeams(): Promise<TeamDef[]> {
@@ -116,15 +127,11 @@ export async function loadSkill(skillId: string): Promise<SkillEntry> {
 }
 
 export async function listSkillIds(): Promise<string[]> {
-  const dir = resolveSkillTemplatesDir();
-  try {
-    const entries = await fs.readdir(dir);
-    return entries
-      .filter((e) => e.endsWith(".yaml"))
-      .map((e) => e.replace(/\.yaml$/, ""));
-  } catch {
-    return [];
-  }
+  const overlay = resolveOverlayTemplatesDir();
+  return listYamlIds([
+    ...(overlay ? [path.join(overlay, "skills")] : []),
+    resolveSkillTemplatesDir(),
+  ]);
 }
 
 export async function loadAllSkills(): Promise<SkillEntry[]> {
@@ -149,15 +156,11 @@ export async function loadPack(packId: string): Promise<PackDef> {
 }
 
 export async function listPackIds(): Promise<string[]> {
-  const dir = resolvePacksDir();
-  try {
-    const entries = await fs.readdir(dir);
-    return entries
-      .filter((e) => e.endsWith(".yaml"))
-      .map((e) => e.replace(/\.yaml$/, ""));
-  } catch {
-    return [];
-  }
+  const overlay = resolveOverlayTemplatesDir();
+  return listYamlIds([
+    ...(overlay ? [path.join(overlay, "packs")] : []),
+    resolvePacksDir(),
+  ]);
 }
 
 export async function loadAllPacks(): Promise<PackDef[]> {

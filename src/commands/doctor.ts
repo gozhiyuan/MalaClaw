@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
-import { loadLockfile, loadManifest } from "../lib/loader.js";
+import path from "node:path";
+import { loadLockfile } from "../lib/loader.js";
 import { readOpenClawConfig } from "../lib/adapters/openclaw.js";
 import { resolveOpenClawConfigPath, resolveManifestPath } from "../lib/paths.js";
 import type { PackDef } from "../lib/schema.js";
@@ -17,6 +18,27 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function deriveTeamId(pack: { id: string; team_id?: string; agents: Array<{ workspace: string }> }): string {
+  if (pack.team_id) return pack.team_id;
+  const firstAgentWorkspace = pack.agents[0]?.workspace;
+  if (firstAgentWorkspace) {
+    return path.basename(path.dirname(firstAgentWorkspace));
+  }
+  return pack.id.includes("__") ? pack.id.split("__").slice(1).join("__") : pack.id;
+}
+
+function deriveSourcePackId(
+  pack: { id: string; source_id?: string; team_id?: string; agents: Array<{ workspace: string }> },
+): string {
+  if (pack.source_id) return pack.source_id;
+  const teamId = deriveTeamId(pack);
+  const suffix = `__${teamId}`;
+  if (pack.id.endsWith(suffix)) {
+    return pack.id.slice(0, -suffix.length);
+  }
+  return pack.id.includes("__") ? pack.id.split("__")[0] : pack.id;
 }
 
 export async function runDoctor(autoFix: boolean = false): Promise<void> {
@@ -115,6 +137,12 @@ export async function runDoctor(autoFix: boolean = false): Promise<void> {
           message: `[INACTIVE] ${skill.id} — missing env: ${skill.missing_env?.join(", ")}`,
           fix: `Set the required environment variable(s), then re-run: openclaw-store install`,
         });
+      } else if (skill.status === "failed") {
+        findings.push({
+          severity: "error",
+          message: `[FAILED] ${skill.id} — ${skill.install_error ?? "install failed"}`,
+          fix: "Ensure the skill source is available, then re-run: openclaw-store install --force",
+        });
       } else {
         findings.push({ severity: "ok", message: `Skill active: ${skill.id}` });
       }
@@ -125,7 +153,7 @@ export async function runDoctor(autoFix: boolean = false): Promise<void> {
   if (lockfile) {
     const { checkPackCompatibility } = await import("../lib/compat.js");
     const { loadPack } = await import("../lib/loader.js");
-    const installedPackIds = [...new Set((lockfile.packs ?? []).map((p) => p.id.split("__")[0]))];
+    const installedPackIds = [...new Set((lockfile.packs ?? []).map((p) => deriveSourcePackId(p)))];
     const packDefs = await Promise.all(installedPackIds.map((id) =>
       loadPack(id).catch(() => null)
     ));

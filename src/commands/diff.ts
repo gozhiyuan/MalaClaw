@@ -44,6 +44,7 @@ export async function runDiff(projectDir?: string): Promise<void> {
   const existingSkillMap = new Map(
     (existing.skills ?? []).map((s) => [s.id, s.status]),
   );
+  const newSkillIds = new Set(newSkills.map((s) => s.skillDef.id));
   for (const s of newSkills) {
     const prevStatus = existingSkillMap.get(s.skillDef.id);
     if (prevStatus === undefined) {
@@ -55,6 +56,11 @@ export async function runDiff(projectDir?: string): Promise<void> {
         id: s.skillDef.id,
         detail: `${prevStatus} → ${s.status}`,
       });
+    }
+  }
+  for (const id of existingSkillMap.keys()) {
+    if (!newSkillIds.has(id)) {
+      diffs.push({ type: "removed", kind: "skill", id });
     }
   }
 

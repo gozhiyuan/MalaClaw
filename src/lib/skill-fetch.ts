@@ -40,15 +40,8 @@ export async function installSkillToWorkspaces(
     }));
   }
 
-  const cacheDir = path.join(
-    resolveStoreRoot(),
-    "cache",
-    "skills",
-    `${skill.id}@${skill.version}`,
-  );
-  await fs.rm(cacheDir, { recursive: true, force: true });
-  await fs.mkdir(path.dirname(cacheDir), { recursive: true });
-  await fs.cp(source, cacheDir, { recursive: true });
+  const cacheDir = resolveCanonicalSkillCacheDir(skill);
+  await materializeSkillCache(source, cacheDir);
 
   const results: SkillInstallResult[] = [];
   for (const workspaceDir of workspaceDirs) {
@@ -82,6 +75,7 @@ export async function installSkillToWorkspaces(
 
 async function resolveSkillSource(skill: SkillEntry): Promise<string | null> {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const versionedCacheDir = resolveCanonicalSkillCacheDir(skill);
 
   if (skill.source.type === "local" && skill.source.url) {
     const src = skill.source.url.startsWith("~")
@@ -93,6 +87,7 @@ async function resolveSkillSource(skill: SkillEntry): Promise<string | null> {
 
   // openclaw-bundled or clawhub: look in user skill cache dirs
   const candidates = [
+    versionedCacheDir,
     path.join(home, ".openclaw", "workspace", "skills", skill.id),
     path.join(home, ".openclaw", "skills", skill.id),
     path.join(resolveStoreRoot(), "cache", "skills", skill.id),
@@ -105,4 +100,23 @@ async function resolveSkillSource(skill: SkillEntry): Promise<string | null> {
 
 async function pathExists(p: string): Promise<boolean> {
   try { await fs.access(p); return true; } catch { return false; }
+}
+
+function resolveCanonicalSkillCacheDir(skill: SkillEntry): string {
+  return path.join(
+    resolveStoreRoot(),
+    "cache",
+    "skills",
+    `${skill.id}@${skill.version}`,
+  );
+}
+
+async function materializeSkillCache(source: string, cacheDir: string): Promise<void> {
+  if (path.resolve(source) === path.resolve(cacheDir)) {
+    return;
+  }
+
+  await fs.rm(cacheDir, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(cacheDir), { recursive: true });
+  await fs.cp(source, cacheDir, { recursive: true });
 }

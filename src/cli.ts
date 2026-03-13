@@ -79,9 +79,26 @@ program
     }
 
     const packs = lockfile.packs ?? [];
+    const deriveTeamId = (pack: typeof packs[number]): string => {
+      if (pack.team_id) return pack.team_id;
+      const firstAgentWorkspace = pack.agents[0]?.workspace;
+      if (firstAgentWorkspace) {
+        return path.basename(path.dirname(firstAgentWorkspace));
+      }
+      return pack.id.includes("__") ? pack.id.split("__").slice(1).join("__") : pack.id;
+    };
+    const deriveSourcePackId = (pack: typeof packs[number]): string => {
+      if (pack.source_id) return pack.source_id;
+      const teamId = deriveTeamId(pack);
+      const suffix = `__${teamId}`;
+      if (pack.id.endsWith(suffix)) {
+        return pack.id.slice(0, -suffix.length);
+      }
+      return pack.id.includes("__") ? pack.id.split("__")[0] : pack.id;
+    };
     const toRemove = opts.all
       ? packs
-      : packs.filter((p) => p.id === opts.pack);
+      : packs.filter((p) => p.id === opts.pack || deriveSourcePackId(p) === opts.pack);
 
     if (toRemove.length === 0) {
       console.log(opts.pack ? `Pack "${opts.pack}" not installed.` : "Nothing to uninstall.");
@@ -93,8 +110,8 @@ program
       const firstAgentWorkspace = pack.agents[0]?.workspace;
       const workspaceRoot = firstAgentWorkspace
         ? path.dirname(firstAgentWorkspace)  // parent of agent workspace = team workspace root
-        : path.join(resolveStoreWorkspacesRoot(), pack.id);
-      const teamId = pack.id.includes("__") ? pack.id.split("__").slice(1).join("__") : pack.id;
+        : path.join(resolveStoreWorkspacesRoot(), deriveTeamId(pack));
+      const teamId = deriveTeamId(pack);
       console.log(`Uninstalling pack: ${pack.id}...`);
       await uninstallTeam(teamId, workspaceRoot);
       console.log(`✓ Uninstalled ${pack.id}`);

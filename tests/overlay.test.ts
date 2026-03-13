@@ -29,4 +29,19 @@ describe("overlay loader", () => {
     expect(agent.name).toBe("Custom PM");
     delete process.env.OPENCLAW_STORE_TEMPLATES;
   });
+
+  it("lists overlay-only agent templates for validation", async () => {
+    const agentsDir = path.join(tmpDir, "agents");
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(agentsDir, "overlay-only.yaml"),
+      `id: overlay-only\nversion: 1\nname: "Overlay Only"\nsoul:\n  persona: "Custom persona"\nmodel:\n  primary: "claude-haiku-4-5"\ncapabilities: {}\nteam_role:\n  role: specialist\n`,
+    );
+
+    process.env.OPENCLAW_STORE_TEMPLATES = tmpDir;
+    const { listAgentIds } = await import("../src/lib/loader.js");
+    const ids = await listAgentIds();
+    expect(ids).toContain("overlay-only");
+    delete process.env.OPENCLAW_STORE_TEMPLATES;
+  });
 });

@@ -23,8 +23,6 @@ export async function projectStatus(): Promise<void> {
   console.log(`Skills: ${lockfile.skills?.length ?? 0}`);
 
   for (const pack of lockfile.packs ?? []) {
-    const activeSkills = lockfile.skills?.filter((s) => s.status === "active").length ?? 0;
-    const inactiveSkills = lockfile.skills?.filter((s) => s.status === "inactive").length ?? 0;
     console.log(`\nPack: ${pack.id} (v${pack.version})`);
     console.log(`  Agents: ${pack.agents.length}`);
     for (const agent of pack.agents) {
@@ -35,11 +33,15 @@ export async function projectStatus(): Promise<void> {
   if ((lockfile.skills?.length ?? 0) > 0) {
     const active = lockfile.skills!.filter((s) => s.status === "active");
     const inactive = lockfile.skills!.filter((s) => s.status === "inactive");
+    const failed = lockfile.skills!.filter((s) => s.status === "failed");
     if (active.length > 0) {
       console.log(`\nActive skills: ${active.map((s) => s.id).join(", ")}`);
     }
     if (inactive.length > 0) {
       console.log(`Inactive skills: ${inactive.map((s) => s.id).join(", ")}`);
+    }
+    if (failed.length > 0) {
+      console.log(`Failed skills: ${failed.map((s) => s.id).join(", ")}`);
     }
   }
 }

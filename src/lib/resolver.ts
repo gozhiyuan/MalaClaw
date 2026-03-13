@@ -129,6 +129,8 @@ function buildLockedPack(resolved: ResolvedPack): LockedPack {
   return {
     type: "pack",
     id: `${resolved.packId}__${resolved.teamDef.id}`,  // unique per team
+    source_id: resolved.packId,
+    team_id: resolved.teamDef.id,
     version: resolved.version,
     agents: resolved.agents.map((a) => ({
       id: a.agentId,

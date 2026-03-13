@@ -263,12 +263,15 @@ export type ProvisionParams = {
   allMembers: { member: TeamMember; agent: AgentDef }[];
   workspaceDir: string;
   agentDir: string;
+  createAgentDir?: boolean;
   overwrite?: boolean;
 };
 
 export async function provisionAgent(params: ProvisionParams): Promise<void> {
   await fs.mkdir(params.workspaceDir, { recursive: true });
-  await fs.mkdir(params.agentDir, { recursive: true });
+  if (params.createAgentDir !== false) {
+    await fs.mkdir(params.agentDir, { recursive: true });
+  }
 
   const files = renderBootstrapFiles(
     params.agentDef,
@@ -296,6 +299,7 @@ export type InstallTeamParams = {
   agents: { agentDef: AgentDef; member: TeamMember; workspaceDir: string; agentDir: string }[];
   overwrite?: boolean;
   dryRun?: boolean;
+  skipOpenClaw?: boolean;
 };
 
 export type InstallAction = {
@@ -323,6 +327,7 @@ export async function installTeam(params: InstallTeamParams): Promise<void> {
       allMembers,
       workspaceDir: agent.workspaceDir,
       agentDir: agent.agentDir,
+      createAgentDir: true,
       overwrite: params.overwrite,
     });
   }
@@ -372,6 +377,7 @@ export async function installTeamWorkspacesOnly(params: InstallTeamParams): Prom
       allMembers,
       workspaceDir: agent.workspaceDir,
       agentDir: agent.agentDir,
+      createAgentDir: false,
       overwrite: params.overwrite,
     });
   }
@@ -392,11 +398,13 @@ export function planInstallTeam(params: InstallTeamParams): InstallAction[] {
       path: agent.workspaceDir,
       description: `Create workspace dir for ${agent.agentDef.name}`,
     });
-    actions.push({
-      type: "create_agent_dir",
-      path: agent.agentDir,
-      description: `Create agent dir for ${agent.agentDef.name}`,
-    });
+    if (!params.skipOpenClaw) {
+      actions.push({
+        type: "create_agent_dir",
+        path: agent.agentDir,
+        description: `Create agent dir for ${agent.agentDef.name}`,
+      });
+    }
 
     const files = renderBootstrapFiles(
       agent.agentDef,
@@ -413,17 +421,19 @@ export function planInstallTeam(params: InstallTeamParams): InstallAction[] {
     }
   }
 
-  actions.push({
-    type: "patch_config",
-    path: resolveOpenClawConfigPath(),
-    description: `Patch openclaw.json: add ${params.agents.length} agents to list`,
-  });
+  if (!params.skipOpenClaw) {
+    actions.push({
+      type: "patch_config",
+      path: resolveOpenClawConfigPath(),
+      description: `Patch openclaw.json: add ${params.agents.length} agents to list`,
+    });
 
-  actions.push({
-    type: "update_guidance",
-    path: resolveMainAgentWorkspaceDir(),
-    description: "Update TOOLS.md and AGENTS.md with store guidance",
-  });
+    actions.push({
+      type: "update_guidance",
+      path: resolveMainAgentWorkspaceDir(),
+      description: "Update TOOLS.md and AGENTS.md with store guidance",
+    });
+  }
 
   return actions;
 }

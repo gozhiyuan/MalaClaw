@@ -195,6 +195,8 @@ export const LockedAgent = z.object({
 export const LockedPack = z.object({
   type: z.literal("pack"),
   id: z.string(),
+  source_id: z.string().optional(),
+  team_id: z.string().optional(),
   version: z.string(),
   checksum: z.string().optional(),
   agents: z.array(LockedAgent),
@@ -204,8 +206,9 @@ export const LockedSkill = z.object({
   type: z.literal("skill"),
   id: z.string(),
   version: z.string(),
-  status: z.enum(["active", "inactive"]),
+  status: z.enum(["active", "inactive", "failed"]),
   missing_env: z.array(z.string()).optional(),
+  install_error: z.string().optional(),
 });
 
 export const Lockfile = z.object({

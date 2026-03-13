@@ -6,7 +6,7 @@
 
 **Architecture:** Three-phase progression: Phase 1 stabilises the core install engine (tests, real skill install, multi-team packs, diff/apply, local overlays); Phase 2 adds a web dashboard, remote pack sources, and AI-assisted generation; Phase 3 introduces community catalog workflows, structured task backends, and Claude Code export. All state is project-local YAML — the CLI is the single source of truth.
 
-**Tech Stack:** TypeScript (NodeNext ESM), Zod, yaml, commander, @clack/prompts, vitest (tests), Node ≥ 20
+**Tech Stack:** TypeScript (NodeNext ESM), Zod, yaml, commander, @clack/prompts, vitest (tests), Node ≥ 22
 
 ---
 
@@ -436,10 +436,35 @@ git commit -m "feat: local overlay directory for custom templates (OPENCLAW_STOR
 ### Task 5: Multi-team pack support
 
 **Files:**
+- Modify: `src/lib/paths.ts` (allow test-only pack/template root overrides)
+- Modify: `src/lib/loader.ts` (use injectable roots for tests)
 - Modify: `src/lib/resolver.ts` (fix `teams[0]` limitation)
 - Create: `tests/resolver.test.ts`
 
-**Step 1: Write failing test**
+**Implementation note:** Do not add fixture packs under `tests/fixtures/` until the loader can read from test-specific roots. Otherwise the multi-team test fails because the pack cannot be found, not because `teams[0]` is still broken.
+
+**Step 1: Add injectable loader roots for tests**
+
+Before writing the multi-team fixture test, add test-only path resolution so `loadPack()` and related helpers can read from fixture directories:
+
+```typescript
+// in src/lib/paths.ts
+export function resolvePacksDir(): string {
+  const env = process.env.OPENCLAW_STORE_PACKS_DIR?.trim();
+  if (env) return env;
+  return path.resolve(__dirname, "..", "..", "packs");
+}
+
+export function resolveTemplatesRoot(): string {
+  const env = process.env.OPENCLAW_STORE_BUNDLED_TEMPLATES?.trim();
+  if (env) return env;
+  return path.resolve(__dirname, "..", "..", "templates");
+}
+```
+
+Use the existing loader helpers so tests can point at fixture directories without changing production behavior.
+
+**Step 2: Write baseline resolver test**
 
 ```typescript
 // tests/resolver.test.ts
@@ -487,7 +512,7 @@ describe("resolveManifest", () => {
 });
 ```
 
-**Step 2: Run to confirm passing (single-team case already works)**
+**Step 3: Run to confirm passing (single-team case already works)**
 
 ```bash
 npm test tests/resolver.test.ts
@@ -495,7 +520,7 @@ npm test tests/resolver.test.ts
 
 Expected: PASS — confirm baseline before multi-team change.
 
-**Step 3: Write multi-team test**
+**Step 4: Write multi-team test**
 
 Add to `tests/resolver.test.ts`:
 
@@ -515,7 +540,7 @@ Add to `tests/resolver.test.ts`:
   });
 ```
 
-**Step 4: Create fixture pack**
+**Step 5: Create fixture pack**
 
 ```yaml
 # tests/fixtures/packs/multi-team-fixture.yaml
@@ -528,15 +553,15 @@ teams:
   - research-lab
 ```
 
-**Step 5: Run — confirm it FAILS** (resolver only takes teams[0])
+**Step 6: Point loader at fixture pack dir and run — confirm it FAILS** (resolver only takes teams[0])
 
 ```bash
-npm test tests/resolver.test.ts
+OPENCLAW_STORE_PACKS_DIR=$PWD/tests/fixtures/packs npm test tests/resolver.test.ts
 ```
 
 Expected: FAIL on multi-team test.
 
-**Step 6: Fix `src/lib/resolver.ts`**
+**Step 7: Fix `src/lib/resolver.ts`**
 
 Replace the pack resolution loop body:
 
@@ -584,17 +609,13 @@ function buildLockedPack(resolved: ResolvedPack): LockedPack {
 }
 ```
 
-**Step 7: Run all tests**
+**Step 8: Run all tests**
 
 ```bash
-npm test
+OPENCLAW_STORE_PACKS_DIR=$PWD/tests/fixtures/packs npm test
 ```
 
 Expected: All PASS
-
-**Step 8: Point loader at fixture pack dir for the multi-team test**
-
-Update the test to set `OPENCLAW_STORE_TEMPLATES` to the fixtures dir so the fixture pack is found, then restore after the test.
 
 **Step 9: Commit**
 
@@ -628,7 +649,7 @@ export const PackDef = z.object({
     .object({
       openclaw_min: z.string().optional(),  // e.g. "2026.2.0"
       openclaw_max: z.string().optional(),  // exclusive upper bound
-      node_min: z.string().optional(),      // e.g. "20.0.0"
+      node_min: z.string().optional(),      // e.g. "22.0.0"
     })
     .optional(),
 });
@@ -639,17 +660,18 @@ export const PackDef = z.object({
 ```yaml
 # append to each packs/*.yaml
 compatibility:
-  openclaw_min: "2026.1.0"
-  node_min: "20.0.0"
+  openclaw_min: "2026.2.9"
+  node_min: "22.0.0"
 ```
 
 **Step 3: Create `src/lib/compat.ts`**
 
 ```typescript
-import fs from "node:fs/promises";
-import path from "node:path";
-import { resolveOpenClawStateDir } from "./paths.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { PackDef } from "./schema.js";
+
+const execFileAsync = promisify(execFile);
 
 export type CompatResult = {
   ok: boolean;
@@ -657,23 +679,15 @@ export type CompatResult = {
   errors: string[];
 };
 
-/** Read OpenClaw's version from its version file, if present */
+/** Read OpenClaw's version via CLI probe. */
 export async function readOpenClawVersion(): Promise<string | null> {
-  // OpenClaw stores version in ~/.openclaw/version or ~/.openclaw/VERSION
-  for (const name of ["version", "VERSION", "package.json"]) {
-    const p = path.join(resolveOpenClawStateDir(), name);
-    try {
-      const content = await fs.readFile(p, "utf-8");
-      if (name === "package.json") {
-        const pkg = JSON.parse(content) as { version?: string };
-        return pkg.version ?? null;
-      }
-      return content.trim();
-    } catch {
-      // not found, try next
-    }
+  try {
+    const { stdout } = await execFileAsync("openclaw", ["--version"]);
+    const match = stdout.match(/(\d{4}\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)/);
+    return match?.[1] ?? stdout.trim() || null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function semverGte(a: string, b: string): boolean {
@@ -704,7 +718,7 @@ export async function checkPackCompatibility(packs: PackDef[]): Promise<CompatRe
     if (compat.openclaw_min) {
       if (!ocVersion) {
         result.warnings.push(
-          `Pack ${pack.id} requires OpenClaw >= ${compat.openclaw_min} but version could not be detected`,
+          `Pack ${pack.id} requires OpenClaw >= ${compat.openclaw_min} but version could not be detected via CLI probe`,
         );
       } else if (!semverGte(ocVersion, compat.openclaw_min)) {
         result.errors.push(
@@ -718,6 +732,15 @@ export async function checkPackCompatibility(packs: PackDef[]): Promise<CompatRe
   return result;
 }
 ```
+
+**Step 3.5: Add a feature-based follow-up check**
+
+Compatibility should not rely only on version strings. In `doctor`, add at least one capability probe for the installer's required config surface, for example:
+- `agents.list` exists and is writable
+- `tools.agentToAgent.allow` is supported
+- OpenClaw hot reload is enabled or documented as required
+
+If the CLI version is undetectable but the required config surface is present, emit a warning rather than a hard error.
 
 **Step 4: Write tests**
 
@@ -807,6 +830,13 @@ git commit -m "feat: pack compatibility metadata and version checks in doctor"
 - Modify: `src/commands/install.ts` (wire real skill install after workspace creation)
 - Create: `tests/skill-fetch.test.ts`
 
+**Architecture note:** Do not copy every skill into every workspace as the long-term model. The production architecture must use:
+- `~/.openclaw-store/cache/skills/<skill>@<version>/` as the canonical fetched cache
+- per-agent workspace links or lightweight materialization into `workspace/skills/`
+- upgrade logic that refreshes the cached copy once and then relinks dependents
+
+For Phase 1, prefer symlinks. If a platform-specific fallback is needed, copy only when linking is unavailable and record that as a degraded mode.
+
 **Step 1: Create `src/lib/skill-fetch.ts`**
 
 ```typescript
@@ -822,10 +852,10 @@ export type SkillInstallResult = {
 };
 
 /**
- * Install a skill into one or more agent workspace skill directories.
- * For local skills: copies from source path.
- * For openclaw-bundled: looks in ~/.openclaw/skills/<id>.
- * For clawhub: downloads (v2 — for now, checks ~/.openclaw/skills/<id> as pre-downloaded cache).
+ * Install a skill into the shared cache first, then link it into one or more workspaces.
+ * For local skills: canonicalize into ~/.openclaw-store/cache/skills/<id>@<version>/.
+ * For openclaw-bundled: resolve from ~/.openclaw/skills/<id> or ~/.openclaw/workspace/skills/<id>.
+ * For clawhub/community sources: Phase 1 may resolve from pre-fetched cache only; real remote fetch remains a later task.
  */
 export async function installSkillToWorkspaces(
   skill: SkillEntry,
@@ -851,21 +881,42 @@ export async function installSkillToWorkspaces(
     }));
   }
 
+  const cacheDir = path.join(
+    process.env.HOME ?? process.env.USERPROFILE ?? "",
+    ".openclaw-store",
+    "cache",
+    "skills",
+    `${skill.id}@${skill.version}`,
+  );
+  await fs.rm(cacheDir, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(cacheDir), { recursive: true });
+  await fs.cp(source, cacheDir, { recursive: true });
+
   const results: SkillInstallResult[] = [];
   for (const workspaceDir of workspaceDirs) {
     const targetDir = path.join(workspaceDir, "skills", skill.id);
     try {
       await fs.rm(targetDir, { recursive: true, force: true });
       await fs.mkdir(path.dirname(targetDir), { recursive: true });
-      await fs.cp(source, targetDir, { recursive: true });
+      await fs.symlink(cacheDir, targetDir, "dir");
       results.push({ skillId: skill.id, status: "installed", targetDir });
     } catch (err) {
-      results.push({
-        skillId: skill.id,
-        status: "failed",
-        reason: err instanceof Error ? err.message : String(err),
-        targetDir,
-      });
+      try {
+        await fs.cp(cacheDir, targetDir, { recursive: true });
+        results.push({
+          skillId: skill.id,
+          status: "installed",
+          reason: "copied fallback (symlink unavailable)",
+          targetDir,
+        });
+      } catch (copyErr) {
+        results.push({
+          skillId: skill.id,
+          status: "failed",
+          reason: copyErr instanceof Error ? copyErr.message : String(copyErr),
+          targetDir,
+        });
+      }
     }
   }
   return results;
@@ -931,7 +982,7 @@ const makeLocalSkill = (skillDir: string): SkillEntry =>
   });
 
 describe("installSkillToWorkspaces", () => {
-  it("copies local skill into workspace skills directory", async () => {
+  it("installs local skill into cache and exposes it in workspace skills directory", async () => {
     // Set up a fake skill source
     const skillSrc = path.join(tmpDir, "skill-src");
     await fs.mkdir(skillSrc);
@@ -1015,6 +1066,14 @@ node dist/cli.js install --pack dev-company --dry-run
 ```
 
 Expected: Dry-run output unchanged (skill install is a post-workspace step, not in plan).
+
+**Step 5.5: Add a scale-safety doc note**
+
+Document explicitly that:
+- catalog size can be large
+- active installed teams should remain small
+- skills are cached once and linked many times
+- future upgrade logic must update the cache and then relink, not duplicate
 
 **Step 6: Commit**
 
@@ -1409,7 +1468,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: ["20.x", "22.x"]
+        node-version: ["22.x"]
 
     steps:
       - uses: actions/checkout@v4
@@ -1504,10 +1563,15 @@ In `readOpenClawConfig`, catch ENOENT specifically and throw with a helpful mess
 
 ```bash
 npm run build
-cd /tmp/test-ocs && openclaw-store install --no-openclaw --dry-run
+cd /tmp/test-ocs && openclaw-store init
+openclaw-store install --no-openclaw
 ```
 
-Expected: Dry-run succeeds without touching `~/.openclaw/`.
+Expected:
+- install succeeds without requiring `~/.openclaw/openclaw.json`
+- `openclaw-store.lock` is written
+- workspace files are created under `~/.openclaw-store/`
+- no OpenClaw config patch is attempted
 
 **Step 5: Commit**
 

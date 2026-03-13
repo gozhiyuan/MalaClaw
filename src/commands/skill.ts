@@ -19,7 +19,9 @@ export async function skillList(): Promise<void> {
     const statusStr = locked
       ? locked.status === "active"
         ? " [ACTIVE]"
-        : ` [INACTIVE — missing: ${locked.missing_env?.join(", ")}]`
+        : locked.status === "failed"
+          ? ` [FAILED — ${locked.install_error ?? "install failed"}]`
+          : ` [INACTIVE — missing: ${locked.missing_env?.join(", ")}]`
       : "";
     const tier = s.trust_tier;
     console.log(`  ${s.name.padEnd(28)} (${s.id})  ${tier}${statusStr}`);
@@ -50,7 +52,9 @@ export async function skillShow(skillId: string): Promise<void> {
     const statusStr =
       locked.status === "active"
         ? "✓ ACTIVE"
-        : `⚠ INACTIVE — missing: ${locked.missing_env?.join(", ")}`;
+        : locked.status === "failed"
+          ? `✗ FAILED — ${locked.install_error ?? "install failed"}`
+          : `⚠ INACTIVE — missing: ${locked.missing_env?.join(", ")}`;
     console.log(`Status:      ${statusStr}`);
   }
 
@@ -87,6 +91,9 @@ export async function skillCheck(): Promise<void> {
   for (const s of lockfile.skills) {
     if (s.status === "active") {
       console.log(`  ✓ [ACTIVE]   ${s.id}`);
+    } else if (s.status === "failed") {
+      allActive = false;
+      console.log(`  ✗ [FAILED]   ${s.id}  error: ${s.install_error ?? "install failed"}`);
     } else {
       allActive = false;
       console.log(`  ✗ [INACTIVE] ${s.id}  missing: ${s.missing_env?.join(", ")}`);
@@ -94,6 +101,6 @@ export async function skillCheck(): Promise<void> {
   }
 
   if (!allActive) {
-    console.log("\nSet the missing environment variables, then re-run: openclaw-store install");
+    console.log("\nFix the missing configuration or unavailable skill sources, then re-run: openclaw-store install");
   }
 }
