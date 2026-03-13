@@ -1,0 +1,18 @@
+id: github
+version: 1
+name: "GitHub"
+description: "GitHub operations: issues, PRs, code review, repository management"
+
+source:
+  type: openclaw-bundled
+  pin: "1.0.0"
+
+trust_tier: curated
+
+requires:
+  bins: []
+  env: []
+
+disabled_until_configured: false
+
+install_hints: []

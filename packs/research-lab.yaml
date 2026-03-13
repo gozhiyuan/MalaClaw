@@ -1,0 +1,8 @@
+id: research-lab
+version: "1.0.0"
+name: "Research Lab"
+description: "Research team: Research Lead, Data Analyst, Researcher, Report Writer"
+teams:
+  - research-lab
+default_skills:
+  - last30days

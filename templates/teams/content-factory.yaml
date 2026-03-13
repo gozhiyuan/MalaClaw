@@ -1,0 +1,40 @@
+id: content-factory
+name: "Content Factory"
+version: 1
+
+members:
+  - agent: editor
+    role: lead
+    entry_point: true
+  - agent: writer
+    role: specialist
+  - agent: seo-specialist
+    role: specialist
+  - agent: social-media-manager
+    role: specialist
+  - agent: video-producer
+    role: specialist
+
+graph:
+  - from: editor
+    to: writer
+    relationship: delegates_to
+  - from: editor
+    to: seo-specialist
+    relationship: delegates_to
+  - from: editor
+    to: social-media-manager
+    relationship: delegates_to
+  - from: editor
+    to: video-producer
+    relationship: delegates_to
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/content-factory/shared/memory/"
+  files:
+    - path: pipeline-log.md
+      access: append-only
+      writer: "*"
+    - path: content-brief.md
+      access: single-writer
+      writer: editor

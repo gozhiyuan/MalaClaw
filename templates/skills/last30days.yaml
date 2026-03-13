@@ -1,0 +1,30 @@
+id: last30days
+version: 1
+name: "Last 30 Days Research"
+description: "Research any topic across Reddit, X, YouTube, and the web from the last 30 days"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/mvanhorn/last30days"
+  pin: "1.2.0"
+
+trust_tier: community
+
+requires:
+  bins: []
+  env:
+    - key: OPENAI_API_KEY
+      description: "OpenAI key for search aggregation and summarization"
+      required: true
+    - key: SERP_API_KEY
+      description: "SerpAPI key for Google web search results"
+      required: false
+      degradation: "Web search results will be limited to non-Google sources"
+
+disabled_until_configured: true
+
+install_hints:
+  - "Get your OpenAI API key at https://platform.openai.com/api-keys"
+  - "Get a SerpAPI key at https://serpapi.com (free tier: 100 searches/month)"
+  - "Set: export OPENAI_API_KEY=sk-..."
+  - "Then re-run: openclaw-store install"

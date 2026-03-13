@@ -1,0 +1,35 @@
+id: research-lab
+name: "Research Lab"
+version: 1
+
+members:
+  - agent: research-lead
+    role: lead
+    entry_point: true
+  - agent: analyst
+    role: specialist
+  - agent: researcher
+    role: specialist
+  - agent: report-writer
+    role: specialist
+
+graph:
+  - from: research-lead
+    to: analyst
+    relationship: delegates_to
+  - from: research-lead
+    to: researcher
+    relationship: delegates_to
+  - from: research-lead
+    to: report-writer
+    relationship: delegates_to
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/research-lab/shared/memory/"
+  files:
+    - path: findings-log.md
+      access: append-only
+      writer: "*"
+    - path: research-brief.md
+      access: single-writer
+      writer: research-lead

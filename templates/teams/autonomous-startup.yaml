@@ -1,0 +1,20 @@
+id: autonomous-startup
+name: "Autonomous Startup"
+version: 1
+
+members:
+  - agent: ceo
+    role: lead
+    entry_point: true
+
+graph: []
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/autonomous-startup/shared/memory/"
+  files:
+    - path: goals.md
+      access: single-writer
+      writer: ceo
+    - path: tasks-log.md
+      access: append-only
+      writer: "*"

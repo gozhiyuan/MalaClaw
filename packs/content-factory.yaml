@@ -1,0 +1,8 @@
+id: content-factory
+version: "1.0.0"
+name: "Content Factory"
+description: "Content production team: Editor, Writer, SEO Specialist, Social Media Manager, Video Producer"
+teams:
+  - content-factory
+default_skills:
+  - last30days

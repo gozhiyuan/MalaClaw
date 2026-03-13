@@ -1,0 +1,29 @@
+{
+  "name": "openclaw-app-store",
+  "version": "1.0.0",
+  "description": "Starter packs, agent templates, and CLI installer for OpenClaw",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "openclaw-store": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "dev": "tsc -p tsconfig.json --watch",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "commander": "^12.1.0",
+    "json5": "^2.2.3",
+    "yaml": "^2.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,9 @@
+id: autonomous-startup
+version: "1.0.0"
+name: "Autonomous Startup"
+description: "Single-agent CEO generalist that spawns sub-agents as needed for any task"
+teams:
+  - autonomous-startup
+default_skills:
+  - github
+  - last30days

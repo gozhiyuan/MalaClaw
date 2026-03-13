@@ -1,0 +1,56 @@
+id: dev-company
+name: "Dev Company"
+version: 1
+
+members:
+  - agent: pm
+    role: lead
+    entry_point: true
+  - agent: tech-lead
+    role: lead
+  - agent: backend-dev
+    role: specialist
+  - agent: frontend-dev
+    role: specialist
+  - agent: qa-engineer
+    role: reviewer
+  - agent: security-engineer
+    role: reviewer
+  - agent: devops-engineer
+    role: specialist
+
+graph:
+  - from: pm
+    to: tech-lead
+    relationship: delegates_to
+  - from: pm
+    to: devops-engineer
+    relationship: delegates_to
+  - from: tech-lead
+    to: backend-dev
+    relationship: delegates_to
+  - from: tech-lead
+    to: frontend-dev
+    relationship: delegates_to
+  - from: tech-lead
+    to: qa-engineer
+    relationship: requests_review
+  - from: tech-lead
+    to: security-engineer
+    relationship: requests_review
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/dev-company/shared/memory/"
+  files:
+    - path: tasks-log.md
+      access: append-only
+      writer: "*"
+    - path: team-shared.md
+      access: single-writer
+      writer: pm
+    - path: kanban.md
+      access: single-writer
+      writer: pm
+    - path: blockers.md
+      access: append-only
+      writer: "*"

@@ -1,0 +1,8 @@
+id: dev-company
+version: "1.0.0"
+name: "Dev Company"
+description: "Full software development team: PM, Tech Lead, Backend, Frontend, QA, Security, DevOps"
+teams:
+  - dev-company
+default_skills:
+  - github
