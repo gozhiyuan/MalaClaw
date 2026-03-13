@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { loadLockfile, loadManifest } from "../lib/loader.js";
 import { readOpenClawConfig } from "../lib/adapters/openclaw.js";
 import { resolveOpenClawConfigPath, resolveManifestPath } from "../lib/paths.js";
+import type { PackDef } from "../lib/schema.js";
 
 type Finding = {
   severity: "ok" | "warning" | "error";
@@ -124,7 +125,6 @@ export async function runDoctor(autoFix: boolean = false): Promise<void> {
   if (lockfile) {
     const { checkPackCompatibility } = await import("../lib/compat.js");
     const { loadPack } = await import("../lib/loader.js");
-    const { PackDef } = await import("../lib/schema.js");
     const installedPackIds = [...new Set((lockfile.packs ?? []).map((p) => p.id.split("__")[0]))];
     const packDefs = await Promise.all(installedPackIds.map((id) =>
       loadPack(id).catch(() => null)

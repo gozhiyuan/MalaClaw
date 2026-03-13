@@ -209,6 +209,16 @@ program
     await runDiff();
   });
 
+// ── validate ─────────────────────────────────────────────────────────────────
+
+program
+  .command("validate")
+  .description("Validate all templates against schema")
+  .action(async () => {
+    const { runValidate } = await import("./commands/validate.js");
+    await runValidate();
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 
 program
