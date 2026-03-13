@@ -62,29 +62,27 @@ export async function resolveManifest(manifest: Manifest): Promise<ResolveResult
   // Resolve packs
   for (const packRef of manifest.packs ?? []) {
     const packDef = await loadPack(packRef.id);
-    const teamId = packDef.teams[0]; // Each pack maps to one primary team
-    if (!teamId) {
-      throw new Error(`Pack ${packRef.id} has no teams defined`);
+
+    // Support multi-team packs: resolve each team separately
+    for (const teamId of packDef.teams) {
+      const teamDef = await loadTeam(teamId);
+
+      const resolvedAgents: ResolvedAgent[] = [];
+      for (const member of teamDef.members) {
+        const agentDef = await loadAgent(member.agent);
+        const agentId = resolveAgentId(teamId, agentDef.id);
+        const workspaceDir = resolveAgentWorkspaceDir(teamId, agentDef.id);
+        const agentDir = resolveOpenClawAgentDir(teamId, agentDef.id);
+        resolvedAgents.push({ agentDef, teamDef, agentId, workspaceDir, agentDir });
+      }
+
+      packs.push({
+        packId: packRef.id,
+        version: packDef.version,
+        teamDef,
+        agents: resolvedAgents,
+      });
     }
-
-    const teamDef = await loadTeam(teamId);
-
-    const resolvedAgents: ResolvedAgent[] = [];
-    for (const member of teamDef.members) {
-      const agentDef = await loadAgent(member.agent);
-      const agentId = resolveAgentId(teamId, agentDef.id);
-      const workspaceDir = resolveAgentWorkspaceDir(teamId, agentDef.id);
-      const agentDir = resolveOpenClawAgentDir(teamId, agentDef.id);
-
-      resolvedAgents.push({ agentDef, teamDef, agentId, workspaceDir, agentDir });
-    }
-
-    packs.push({
-      packId: packRef.id,
-      version: packDef.version,
-      teamDef,
-      agents: resolvedAgents,
-    });
   }
 
   // Resolve skills
@@ -130,7 +128,7 @@ export async function resolveManifest(manifest: Manifest): Promise<ResolveResult
 function buildLockedPack(resolved: ResolvedPack): LockedPack {
   return {
     type: "pack",
-    id: resolved.packId,
+    id: `${resolved.packId}__${resolved.teamDef.id}`,  // unique per team
     version: resolved.version,
     agents: resolved.agents.map((a) => ({
       id: a.agentId,

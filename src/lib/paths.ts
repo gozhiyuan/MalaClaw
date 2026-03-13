@@ -65,6 +65,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function resolveTemplatesRoot(): string {
+  const env = process.env.OPENCLAW_STORE_BUNDLED_TEMPLATES?.trim();
+  if (env) return env;
   // src/lib/paths.ts → ../../templates
   return path.resolve(__dirname, "..", "..", "templates");
 }
@@ -82,6 +84,8 @@ export function resolveSkillTemplatesDir(): string {
 }
 
 export function resolvePacksDir(): string {
+  const env = process.env.OPENCLAW_STORE_PACKS_DIR?.trim();
+  if (env) return env;
   return path.resolve(__dirname, "..", "..", "packs");
 }
 

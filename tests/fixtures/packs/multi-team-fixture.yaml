@@ -1,0 +1,7 @@
+id: multi-team-fixture
+version: "1.0.0"
+name: "Multi Team Fixture"
+description: "Test fixture only"
+teams:
+  - dev-company
+  - research-lab
