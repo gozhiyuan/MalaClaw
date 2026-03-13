@@ -143,7 +143,7 @@ export async function runDoctor(autoFix: boolean = false): Promise<void> {
   }
 
   // Print results
-  console.log("\nopenclaww-store doctor\n");
+  console.log("\nopenclaw-store doctor\n");
   let hasErrors = false;
   let hasWarnings = false;
 
