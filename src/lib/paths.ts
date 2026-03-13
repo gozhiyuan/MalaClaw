@@ -59,7 +59,7 @@ export function resolveLockfilePath(projectDir: string = process.cwd()): string 
   return path.join(projectDir, "openclaw-store.lock");
 }
 
-// ── Template paths (bundled with openclaw-app-store) ────────────────────────
+// ── Template paths (bundled with openclaw-store) ────────────────────────────
 
 import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -1,4 +1,4 @@
-# How openclaw-app-store Works
+# How openclaw-store Works
 
 This document explains the technical architecture: data flow, file formats, the renderer pipeline, the coordination model, and how to extend everything.
 
@@ -23,7 +23,7 @@ This document explains the technical architecture: data flow, file formats, the 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   openclaw-app-store                        │
+│                     openclaw-store                          │
 │                                                             │
 │  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
 │  │  Templates   │   │     CLI      │   │   Packs        │  │

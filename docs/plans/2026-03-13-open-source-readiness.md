@@ -1,8 +1,8 @@
-# openclaw-app-store: Open Source Readiness Plan
+# openclaw-store: Open Source Readiness Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Elevate openclaw-app-store from a working v1 prototype to a production-grade, open-source-ready platform across three phases — ending with a community pack catalog, dashboard, and AI-assisted configuration.
+**Goal:** Elevate openclaw-store from a working v1 prototype to a production-grade, open-source-ready platform across three phases — ending with a community pack catalog, dashboard, and AI-assisted configuration.
 
 **Architecture:** Three-phase progression: Phase 1 stabilises the core install engine (tests, real skill install, multi-team packs, diff/apply, local overlays); Phase 2 adds a web dashboard, remote pack sources, and AI-assisted generation; Phase 3 introduces community catalog workflows, structured task backends, and Claude Code export. All state is project-local YAML — the CLI is the single source of truth.
 
@@ -1333,7 +1333,7 @@ git commit -m "feat: openclaw-store validate command for schema validation of al
 **Step 1: Create `CONTRIBUTING.md`**
 
 ```markdown
-# Contributing to openclaw-app-store
+# Contributing to openclaw-store
 
 ## Submitting a new agent, team, or pack
 

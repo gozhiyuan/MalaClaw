@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-app-store",
+  "name": "openclaw-store",
   "version": "1.0.0",
   "description": "Starter packs, agent templates, and CLI installer for OpenClaw",
   "type": "module",

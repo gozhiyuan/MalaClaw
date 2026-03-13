@@ -1,4 +1,4 @@
-# Contributing to openclaw-app-store
+# Contributing to openclaw-store
 
 ## Submitting a new agent, team, or pack
 

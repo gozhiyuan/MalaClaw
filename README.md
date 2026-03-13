@@ -1,4 +1,4 @@
-# openclaw-app-store
+# openclaw-store
 
 **Ready-made multi-agent teams for OpenClaw.** Install a full dev company, content studio, or research lab in one command — then customize every agent, team, and skill to match your workflow.
 
@@ -8,7 +8,7 @@
 
 OpenClaw is powerful but has a steep setup curve: configuring agents, wiring up shared memory, preventing race conditions, and setting up team coordination all require deep ecosystem knowledge.
 
-`openclaw-app-store` closes that gap with **starter packs** — pre-built, production-ready multi-agent teams you install like npm packages.
+`openclaw-store` closes that gap with **starter packs** — pre-built, production-ready multi-agent teams you install like npm packages.
 
 ---
 
