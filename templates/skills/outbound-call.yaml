@@ -11,6 +11,7 @@ source:
 trust_tier: community
 
 requires:
+  bins: []
   env:
     - key: TWILIO_ACCOUNT_SID
       description: "Twilio account SID"

@@ -11,6 +11,7 @@ source:
 trust_tier: community
 
 requires:
+  bins: []
   env:
     - key: PUBLORA_API_KEY
       description: "Publora API key for Telegram channel publishing"

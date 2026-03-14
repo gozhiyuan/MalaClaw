@@ -11,6 +11,7 @@ source:
 trust_tier: community
 
 requires:
+  bins: []
   env:
     - key: MS365_CLIENT_ID
       description: "Azure AD application (client) ID"

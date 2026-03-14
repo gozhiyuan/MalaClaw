@@ -11,6 +11,7 @@ source:
 trust_tier: community
 
 requires:
+  bins: []
   env:
     - key: GOOGLE_CLIENT_ID
       description: "Google OAuth2 client ID"

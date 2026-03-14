@@ -11,6 +11,7 @@ source:
 trust_tier: community
 
 requires:
+  bins: []
   env: []
 
 disabled_until_configured: false
