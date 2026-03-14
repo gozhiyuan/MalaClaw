@@ -17,7 +17,7 @@ export async function runDiff(projectDir?: string): Promise<void> {
     return;
   }
 
-  const { packs: newPacks, skills: newSkills } = await resolveManifest(manifest);
+  const { packs: newPacks, skills: newSkills } = await resolveManifest(manifest, { projectDir });
 
   const diffs: DiffEntry[] = [];
 

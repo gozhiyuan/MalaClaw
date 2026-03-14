@@ -9,10 +9,12 @@ import type {
   Lockfile,
   LockedPack,
   LockedSkill,
+  LockedProject,
   AgentDef,
   TeamDef,
   SkillEntry,
 } from "./schema.js";
+import { resolveProjectMeta, type ResolvedProjectMeta } from "./project-meta.js";
 
 export type ResolvedAgent = {
   agentDef: AgentDef;
@@ -33,9 +35,14 @@ export type ResolvedSkill = {
   skillDef: SkillEntry;
   status: "active" | "inactive";
   missingEnv: string[];
+  targets?: {
+    agents?: string[];
+    teams?: string[];
+  };
 };
 
 export type ResolveResult = {
+  project: ResolvedProjectMeta;
   packs: ResolvedPack[];
   skills: ResolvedSkill[];
   lockfile: Lockfile;
@@ -55,7 +62,11 @@ function checkSkillEnv(skill: SkillEntry): { status: "active" | "inactive"; miss
 }
 
 /** Resolve the full manifest into a concrete install plan */
-export async function resolveManifest(manifest: Manifest): Promise<ResolveResult> {
+export async function resolveManifest(
+  manifest: Manifest,
+  opts: { projectDir?: string } = {},
+): Promise<ResolveResult> {
+  const project = resolveProjectMeta(manifest.project, opts.projectDir);
   const packs: ResolvedPack[] = [];
   const skills: ResolvedSkill[] = [];
 
@@ -70,9 +81,9 @@ export async function resolveManifest(manifest: Manifest): Promise<ResolveResult
       const resolvedAgents: ResolvedAgent[] = [];
       for (const member of teamDef.members) {
         const agentDef = await loadAgent(member.agent);
-        const agentId = resolveAgentId(teamId, agentDef.id);
-        const workspaceDir = resolveAgentWorkspaceDir(teamId, agentDef.id);
-        const agentDir = resolveOpenClawAgentDir(teamId, agentDef.id);
+        const agentId = resolveAgentId(project.id, teamId, agentDef.id);
+        const workspaceDir = resolveAgentWorkspaceDir(project.id, teamId, agentDef.id);
+        const agentDir = resolveOpenClawAgentDir(project.id, teamId, agentDef.id);
         resolvedAgents.push({ agentDef, teamDef, agentId, workspaceDir, agentDir });
       }
 
@@ -89,7 +100,7 @@ export async function resolveManifest(manifest: Manifest): Promise<ResolveResult
   for (const skillRef of manifest.skills ?? []) {
     const skillDef = await loadSkill(skillRef.id);
     const { status, missingEnv } = checkSkillEnv(skillDef);
-    skills.push({ skillDef, status, missingEnv });
+    skills.push({ skillDef, status, missingEnv, targets: skillRef.targets });
   }
 
   // Also include default skills from packs
@@ -118,17 +129,30 @@ export async function resolveManifest(manifest: Manifest): Promise<ResolveResult
   const lockfile: Lockfile = {
     version: 1,
     generated_at: new Date().toISOString(),
-    packs: packs.map((p) => buildLockedPack(p)),
+    project: buildLockedProject(project),
+    packs: packs.map((p) => buildLockedPack(project.id, p)),
     skills: skills.map((s) => buildLockedSkill(s)),
   };
 
-  return { packs, skills, lockfile };
+  return { project, packs, skills, lockfile };
 }
 
-function buildLockedPack(resolved: ResolvedPack): LockedPack {
+function buildLockedProject(project: ResolvedProjectMeta): LockedProject {
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    starter: project.starter,
+    entry_team: project.entryTeam,
+    project_dir: project.projectDir,
+  };
+}
+
+function buildLockedPack(projectId: string, resolved: ResolvedPack): LockedPack {
   return {
     type: "pack",
-    id: `${resolved.packId}__${resolved.teamDef.id}`,  // unique per team
+    id: `${projectId}__${resolved.packId}__${resolved.teamDef.id}`,
+    project_id: projectId,
     source_id: resolved.packId,
     team_id: resolved.teamDef.id,
     version: resolved.version,

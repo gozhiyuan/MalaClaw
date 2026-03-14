@@ -1,8 +1,6 @@
 import { loadAgent, loadAllAgents, loadAllTeams } from "../lib/loader.js";
 import { loadLockfile } from "../lib/loader.js";
 import { findAgentTeams } from "../lib/team-graph.js";
-import { resolveAgentWorkspaceDir, resolveAgentId } from "../lib/paths.js";
-import fs from "node:fs/promises";
 
 export async function agentList(): Promise<void> {
   // Show installed agents from lockfile if it exists
@@ -95,9 +93,8 @@ export async function agentRefresh(agentId: string): Promise<void> {
   }
 
   console.log(`Refreshing ${agentId} from pack ${foundPack}...`);
-  // Delegate to install with force=true for this specific agent
-  // For v1, just re-run the full pack install
+  // Re-run the current project's install with force=true.
   const { runInstall } = await import("./install.js");
-  await runInstall({ pack: foundPack, force: true });
+  await runInstall({ force: true });
   console.log(`✓ ${agentId} refreshed.`);
 }

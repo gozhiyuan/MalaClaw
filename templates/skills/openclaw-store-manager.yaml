@@ -1,0 +1,19 @@
+id: openclaw-store-manager
+version: 1
+name: "OpenClaw Store Manager"
+description: "Manage openclaw-store projects, install and retarget project skills, and refresh project agents"
+
+source:
+  type: local
+  url: "openclaw-store-manager"
+
+trust_tier: curated
+
+requires:
+  bins: []
+  env: []
+
+disabled_until_configured: false
+
+install_hints:
+  - "Re-run: openclaw-store install after changing openclaw-store.yaml"

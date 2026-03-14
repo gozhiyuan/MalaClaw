@@ -1,0 +1,26 @@
+id: default-managed
+version: 1
+name: Default Managed Project
+description: Minimal managed OpenClaw project that keeps the normal default
+  workflow available while adding a single generalist entry-point team for
+  structured installs.
+source_usecase: Default Managed Project
+entry_team: autonomous-startup
+packs:
+  - autonomous-startup
+project_skills:
+  - openclaw-store-manager
+tags:
+  - default
+  - managed
+  - general
+  - bootstrap
+external_requirements: []
+bootstrap_prompt: >
+  You are in default managed mode with the openclaw-store-manager skill installed.
+  First, ask the user what they want to build or automate.
+  Use `openclaw-store starter suggest "<their idea>"` to find the closest starter.
+  If they have no specific goal, run `openclaw-store starter list` and help them choose.
+  Once a starter is selected, run `openclaw-store starter init <id> ./my-project`,
+  review the generated openclaw-store.yaml, then run `openclaw-store install`.
+  Tell the user which agent to open in OpenClaw using `openclaw-store project show`.

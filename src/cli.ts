@@ -70,6 +70,8 @@ program
     );
     const { loadLockfile } = await import("./lib/loader.js");
     const { resolveStoreWorkspacesRoot } = await import("./lib/paths.js");
+    const { projectMetaFromLockfile } = await import("./lib/project-meta.js");
+    const { removeRuntimeProject } = await import("./lib/runtime.js");
     const path = await import("node:path");
 
     const lockfile = await loadLockfile();
@@ -79,6 +81,7 @@ program
     }
 
     const packs = lockfile.packs ?? [];
+    const project = projectMetaFromLockfile(lockfile);
     const deriveTeamId = (pack: typeof packs[number]): string => {
       if (pack.team_id) return pack.team_id;
       const firstAgentWorkspace = pack.agents[0]?.workspace;
@@ -113,8 +116,13 @@ program
         : path.join(resolveStoreWorkspacesRoot(), deriveTeamId(pack));
       const teamId = deriveTeamId(pack);
       console.log(`Uninstalling pack: ${pack.id}...`);
-      await uninstallTeam(teamId, workspaceRoot);
+      await uninstallTeam(project.id, teamId, workspaceRoot, pack.agents.map((a) => a.id));
       console.log(`✓ Uninstalled ${pack.id}`);
+    }
+
+    if (opts.all) {
+      await removeRuntimeProject(project.id);
+      console.log(`✓ Removed project registry entry: ${project.id}`);
     }
 
     if (opts.all) {
@@ -204,6 +212,22 @@ skillCmd
 // ── project ───────────────────────────────────────────────────────────────────
 
 const projectCmd = program.command("project").description("Project management");
+
+projectCmd
+  .command("list")
+  .description("List installed projects from the runtime registry")
+  .action(async () => {
+    const { projectList } = await import("./commands/project.js");
+    await projectList();
+  });
+
+projectCmd
+  .command("show <id>")
+  .description("Show runtime details for an installed project")
+  .action(async (id: string) => {
+    const { projectShow } = await import("./commands/project.js");
+    await projectShow(id);
+  });
 
 projectCmd
   .command("status")

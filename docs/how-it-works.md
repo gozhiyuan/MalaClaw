@@ -54,7 +54,8 @@ This document explains the technical architecture: data flow, file formats, the 
            │         File System                │
            │                                    │
            │  ~/.openclaw-store/                │  ← runtime
-           │    workspaces/store/<team>/<agent>/│
+           │    runtime.json                    │
+           │    workspaces/store/<project>/<team>/<agent>/│
            │      SOUL.md                       │
            │      IDENTITY.md                   │
            │      TOOLS.md                      │
@@ -86,6 +87,8 @@ openclaw-store.yaml
   loadManifest()
   ┌────────────────────┐
   │ version: 1         │
+  │ project:           │
+  │   id: my-project   │
   │ packs:             │
   │   - id: dev-company│
   │ skills:            │
@@ -102,11 +105,13 @@ openclaw-store.yaml
   │     .members: [pm, tech-lead, backend-dev, ...]     │
   │   For each member:                                  │
   │     loadAgent("pm") → AgentDef                      │
-  │     resolveAgentId("dev-company", "pm")             │
-  │       → "store__dev-company__pm"                    │
-  │     resolveAgentWorkspaceDir("dev-company", "pm")   │
+  │     resolveAgentId("my-project", "dev-company",     │
+  │                    "pm")                            │
+  │       → "store__my-project__dev-company__pm"        │
+  │     resolveAgentWorkspaceDir("my-project",          │
+  │                              "dev-company", "pm")   │
   │       → "~/.openclaw-store/workspaces/store/        │
-  │             dev-company/pm"                         │
+  │             my-project/dev-company/pm"              │
   │                                                     │
   │ For each skill:                                     │
   │   loadSkill("last30days") → SkillEntry              │
@@ -236,18 +241,18 @@ The same team YAML produces different AGENTS.md for pm (showing it as the sole w
 
 ## The Agent ID Convention
 
-All store-managed agents use a `store__<team>__<agent>` prefix:
+All store-managed agents use a `store__<project>__<team>__<agent>` prefix:
 
 ```
-store__dev-company__pm
-store__dev-company__tech-lead
-store__dev-company__backend-dev
+store__my-project__dev-company__pm
+store__my-project__dev-company__tech-lead
+store__my-project__dev-company__backend-dev
 ```
 
 This prefix lets the installer:
 - Identify all store-managed agents during uninstall
 - Avoid collisions with user-defined agents in `openclaw.json`
-- Filter agents by team for partial uninstalls
+- Reuse the same team template across multiple projects safely
 
 ---
 
@@ -259,15 +264,17 @@ my-project/                        ← git-committed
 └── openclaw-store.lock            ← WHAT was installed (resolved)
 
 ~/.openclaw-store/                 ← NOT committed
+├── runtime.json                  ← installed projects + entry points
 ├── workspaces/
 │   └── store/
-│       └── dev-company/
-│           ├── pm/                ← agent workspace (5 Markdown files)
-│           ├── tech-lead/
-│           ├── backend-dev/
-│           └── shared/
-│               └── memory/        ← shared memory files
-│                   ├── kanban.md
+│       └── my-project/
+│           └── dev-company/
+│               ├── pm/            ← agent workspace (5 Markdown files)
+│               ├── tech-lead/
+│               ├── backend-dev/
+│               └── shared/
+│                   └── memory/    ← shared memory files
+│                       ├── kanban.md
 │                   ├── tasks-log.md
 │                   └── ...
 └── cache/
@@ -285,6 +292,10 @@ my-project/                        ← git-committed
 **Why project-local manifest + lockfile?**
 
 Like `package.json` + `package-lock.json`: the manifest is what you *want*, the lockfile is what was actually *resolved*. The lockfile stores exact workspace paths, agent IDs, and skill status so that `openclaw-store doctor` can verify the installation without re-resolving.
+
+**Why runtime.json as well?**
+
+The manifest and lockfile are local to one project directory. `runtime.json` is the global index that lets OpenClaw Store list all installed projects and their entry-point agents across your machine.
 
 ---
 
@@ -427,6 +438,26 @@ This means one agent YAML can serve multiple teams with different names, and the
 4. Run `openclaw-store install`
 
 The skill's env vars are checked at install time. If required vars are missing and `disabled_until_configured: true`, the skill is installed as **inactive** and reported by `doctor`.
+
+You can also target a project skill without editing every agent template:
+
+```yaml
+skills:
+  - id: openclaw-store-manager
+    targets:
+      agents:
+        - tech-lead
+  - id: last30days
+    targets:
+      teams:
+        - research-lab
+```
+
+Install behavior:
+
+- If an agent template already lists the skill, it receives it
+- If the project manifest targets a team or agent, those workspaces also receive it
+- OpenClaw does not auto-install a missing skill by itself
 
 ### Defining a shared-service agent
 
@@ -574,8 +605,16 @@ compatibility:                # optional version requirements
 
 ### Manifest (`openclaw-store.yaml`)
 
+Created by `openclaw-store init`. This is the project's desired state: which packs and skills you want installed.
+
 ```yaml
 version: 1
+project:
+  id: string                # project namespace used in OpenClaw agent IDs
+  name: string
+  description: string
+  starter: string           # optional future starter/use-case source
+  entry_team: string        # preferred team to open first
 packs:
   - id: string
     version: string           # semver range (^1.0)
@@ -585,22 +624,62 @@ skills:
   - id: string
     env:                      # env requirement overrides
       KEY: required | optional
+    targets:
+      agents:
+        - string
+      teams:
+        - string
+```
+
+Realistic example:
+
+```yaml
+version: 1
+project:
+  id: acme-web
+  name: "Acme Web"
+  entry_team: dev-company
+packs:
+  - id: dev-company
+    overrides:
+      pm.model.primary: "claude-sonnet-4-5"
+  - id: research-lab
+skills:
+  - id: github
+  - id: last30days
+    env:
+      OPENAI_API_KEY: required
+    targets:
+      teams:
+        - research-lab
+  - id: openclaw-store-manager
+    targets:
+      agents:
+        - tech-lead
 ```
 
 ### Lockfile (`openclaw-store.lock`)
 
-Generated by `openclaw-store install`. Do not edit manually.
+Generated by `openclaw-store install` when installing from `openclaw-store.yaml`. It is not written for `openclaw-store install --pack <id>` or `openclaw-store install --dry-run`.
+
+This is the resolved state: exactly which teams, agents, workspaces, and skill states were installed. Do not edit it manually.
 
 ```yaml
 version: 1
 generated_at: string          # ISO timestamp
+project:
+  id: string
+  name: string
+  entry_team: string
+  project_dir: string
 packs:
   - type: pack
-    id: string
+    id: string                # "<project>__<pack>__<team>"
+    project_id: string
     version: string           # resolved version
     checksum: string          # sha256 of pack source
     agents:
-      - id: string            # full agent ID (store__team__agent)
+      - id: string            # full agent ID (store__project__team__agent)
         workspace: string     # absolute path to workspace dir
         agent_dir: string     # absolute path to OpenClaw agent dir
 skills:
@@ -610,6 +689,62 @@ skills:
     status: active | inactive
     missing_env:              # populated when inactive
       - string
+```
+
+Realistic example:
+
+```yaml
+version: 1
+project:
+  id: acme-web
+  name: "Acme Web"
+  entry_team: dev-company
+  project_dir: /Users/you/src/acme-web
+packs:
+  - type: pack
+    id: acme-web__dev-company__dev-company
+    project_id: acme-web
+    source_id: dev-company
+    team_id: dev-company
+    version: 1.0.0
+    agents:
+      - id: store__acme-web__dev-company__pm
+        workspace: /Users/you/.openclaw-store/workspaces/store/acme-web/dev-company/pm
+        agent_dir: /Users/you/.openclaw/agents/store__acme-web__dev-company__pm
+      - id: store__acme-web__dev-company__tech-lead
+        workspace: /Users/you/.openclaw-store/workspaces/store/acme-web/dev-company/tech-lead
+        agent_dir: /Users/you/.openclaw/agents/store__acme-web__dev-company__tech-lead
+  - type: pack
+    id: acme-web__research-lab__research-lab
+    project_id: acme-web
+    source_id: research-lab
+    team_id: research-lab
+    version: 1.0.0
+    agents:
+      - id: store__acme-web__research-lab__research-lead
+        workspace: /Users/you/.openclaw-store/workspaces/store/acme-web/research-lab/research-lead
+        agent_dir: /Users/you/.openclaw/agents/store__acme-web__research-lab__research-lead
+skills:
+  - type: skill
+    id: github
+    version: "1"
+    status: active
+  - type: skill
+    id: last30days
+    version: "1"
+    status: inactive
+    missing_env:
+      - OPENAI_API_KEY
+```
+
+Lifecycle summary:
+
+```bash
+openclaw-store init          # creates openclaw-store.yaml
+openclaw-store install       # reads yaml and writes openclaw-store.lock
+openclaw-store project list  # global registry of installed projects
+openclaw-store install --pack dev-company  # one-shot install, no manifest or lockfile
+openclaw-store install --dry-run           # preview only, no lockfile write
 ```
 
 ---

@@ -14,6 +14,8 @@ OpenClaw is powerful but has a steep setup curve: configuring agents, wiring up 
 
 ## Quick Start
 
+Need the end-to-end usage flow for this repo? See [docs/repo-workflow.md](./docs/repo-workflow.md).
+
 ### 1. Install the CLI
 
 ```bash
@@ -67,10 +69,11 @@ openclaw-store install
 ```
 
 This:
-- Creates agent workspaces at `~/.openclaw-store/workspaces/store/<team>/<agent>/`
+- Creates agent workspaces at `~/.openclaw-store/workspaces/store/<project>/<team>/<agent>/`
 - Writes 5 bootstrap files per agent (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md)
 - Seeds shared memory files with ownership headers
 - Patches `~/.openclaw/openclaw.json` with the new agents
+- Registers the project in `~/.openclaw-store/runtime.json`
 - Updates your main agent's TOOLS.md and AGENTS.md with store guidance
 - Writes `openclaw-store.lock`
 
@@ -81,8 +84,8 @@ openclaw-store doctor
 # ✓ openclaw-store.yaml found
 # ✓ openclaw.json found at ~/.openclaw/openclaw.json
 # ✓ Lockfile found: 1 pack(s), 1 skill(s)
-# ✓ Workspace OK: store__dev-company__pm
-# ✓ Workspace OK: store__dev-company__tech-lead
+# ✓ Workspace OK: store__my-project__dev-company__pm
+# ✓ Workspace OK: store__my-project__dev-company__tech-lead
 # ...
 # ✓ All checks passed.
 ```
@@ -113,7 +116,7 @@ Full software development team. Entry point: **Project Manager**.
 | `tasks-log.md` | append-only | all |
 | `blockers.md` | append-only | all |
 
-**Invoke:** Open the `store__dev-company__pm` agent in OpenClaw and give it a task.
+**Invoke:** Open the `store__<project-id>__dev-company__pm` agent in OpenClaw and give it a task.
 
 ---
 
@@ -192,6 +195,8 @@ openclaw-store team show <id>                # Team graph + shared memory config
 openclaw-store skill show <id>               # Skill details + env var status
 openclaw-store skill check                   # Check which skills are active/inactive
 
+openclaw-store project list                  # List installed projects from runtime.json
+openclaw-store project show <id>             # Show one installed project's entry points
 openclaw-store project status                # Installation overview
 openclaw-store project kanban <team-id>      # Show team kanban board
 
@@ -209,6 +214,57 @@ openclaw-store doctor --fix                  # Attempt auto-remediation
 
 ---
 
+## Project Layer
+
+`openclaw-store` is now project-scoped, not just team-scoped.
+
+- Each project has its own `openclaw-store.yaml` and `openclaw-store.lock`
+- Each install gets a `project.id`
+- Installed agent IDs are namespaced as `store__<project>__<team>__<agent>`
+- Installed workspaces live under `~/.openclaw-store/workspaces/store/<project>/<team>/<agent>/`
+- `~/.openclaw-store/runtime.json` is the global registry of installed projects
+
+The project manifest is the control point for choosing which teams and skills a project should run:
+
+```yaml
+version: 1
+project:
+  id: podcast-studio
+  name: "Podcast Studio"
+  entry_team: content-factory
+packs:
+  - id: content-factory
+  - id: research-lab
+skills:
+  - id: github
+  - id: last30days
+    env:
+      OPENAI_API_KEY: required
+  - id: openclaw-store-manager
+    targets:
+      agents:
+        - tech-lead
+```
+
+That means:
+
+- OpenClaw agents for this project are installed under the `podcast-studio` namespace
+- The project gets both the `content-factory` and `research-lab` teams
+- `content-factory` is the preferred team to open first
+- Any agent template that declares `github` or `last30days` receives those skills during install
+- `openclaw-store-manager` is additionally targeted to `tech-lead` for this project
+
+Skill placement rules:
+
+- A project skill is installed into agents that declare it in their agent YAML
+- You can also target a skill at install time with `targets.agents` or `targets.teams`
+- OpenClaw does not auto-install missing skills on its own
+- If you change skill placement, re-run `openclaw-store install`
+
+To add another project later, create or enter that project's directory and run `openclaw-store init` there. Then use `openclaw-store project list` and `openclaw-store project show <id>` to discover installed projects and their entry-point agents.
+
+---
+
 ## Customisation Guide
 
 ### Override an agent's model
@@ -217,6 +273,9 @@ In `openclaw-store.yaml`:
 
 ```yaml
 version: 1
+project:
+  id: my-project
+  name: "My Project"
 packs:
   - id: dev-company
     overrides:
@@ -249,6 +308,9 @@ skills:
   - id: last30days
     env:
       OPENAI_API_KEY: required
+    targets:
+      teams:
+        - research-lab
 ```
 
 2. Set the env var:
@@ -262,6 +324,7 @@ openclaw-store install
 ```
 
 Skills with missing required env vars are installed as **inactive** and reported by `openclaw-store doctor`.
+Skills are not attached to every agent automatically. They are installed where the agent template or the project `targets` rules place them.
 
 ### Create a custom agent
 
@@ -328,7 +391,7 @@ graph:
     relationship: delegates_to
 
 shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/my-team/shared/memory/"
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/my-team/shared/memory/"
   files:
     - path: tasks-log.md
       access: append-only
@@ -379,16 +442,93 @@ requires:
 disabled_until_configured: true
 ```
 
+To place a skill on specific agents without editing every bundled agent template, target it from the project manifest:
+
+```yaml
+skills:
+  - id: my-skill
+    targets:
+      agents:
+        - pm
+        - tech-lead
+```
+
 ---
 
 ## State Files
 
 | File | Location | Committed? | Purpose |
 |---|---|---|---|
-| `openclaw-store.yaml` | project root | ✓ yes | Which packs/skills at what versions |
-| `openclaw-store.lock` | project root | ✓ yes | Resolved dependency tree + workspace paths |
+| `openclaw-store.yaml` | project root | ✓ yes | Project ID plus which packs/skills should be installed |
+| `openclaw-store.lock` | project root | ✓ yes | Resolved project, team, agent, and skill installation state |
+| `~/.openclaw-store/runtime.json` | home | ✗ no | Global registry of installed projects and entry points |
 | `~/.openclaw-store/` | home | ✗ no | Agent workspaces + shared memory + cache |
 | `~/.openclaw/openclaw.json` | home | ✗ no | Patched by installer (agent list, allowlist) |
+
+`openclaw-store.yaml` is created by `openclaw-store init`.
+
+Example:
+
+```yaml
+version: 1
+project:
+  id: my-project
+  name: "My Project"
+packs:
+  - id: dev-company
+    overrides:
+      pm.model.primary: "claude-sonnet-4-5"
+skills:
+  - id: github
+  - id: last30days
+    env:
+      OPENAI_API_KEY: required
+```
+
+`openclaw-store.lock` is written by `openclaw-store install` when installing from the manifest. It is not written for `openclaw-store install --pack <id>` or `--dry-run`.
+
+Example:
+
+```yaml
+version: 1
+project:
+  id: my-project
+  name: "My Project"
+packs:
+  - type: pack
+    id: my-project__dev-company__dev-company
+    project_id: my-project
+    source_id: dev-company
+    team_id: dev-company
+    version: 1.0.0
+    agents:
+      - id: store__my-project__dev-company__pm
+        workspace: /Users/you/.openclaw-store/workspaces/store/my-project/dev-company/pm
+        agent_dir: /Users/you/.openclaw/agents/store__my-project__dev-company__pm
+      - id: store__my-project__dev-company__tech-lead
+        workspace: /Users/you/.openclaw-store/workspaces/store/my-project/dev-company/tech-lead
+        agent_dir: /Users/you/.openclaw/agents/store__my-project__dev-company__tech-lead
+skills:
+  - type: skill
+    id: github
+    version: "1"
+    status: active
+  - type: skill
+    id: last30days
+    version: "1"
+    status: inactive
+    missing_env:
+      - OPENAI_API_KEY
+```
+
+Typical lifecycle:
+
+```bash
+openclaw-store init     # creates openclaw-store.yaml
+openclaw-store install  # reads yaml, installs teams, writes openclaw-store.lock
+openclaw-store project list
+openclaw-store project show my-project
+```
 
 ---
 

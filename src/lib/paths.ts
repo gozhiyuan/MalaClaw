@@ -35,14 +35,18 @@ export function resolveStoreWorkspacesRoot(): string {
   return path.join(resolveStoreRoot(), "workspaces", "store");
 }
 
+export function resolveProjectWorkspaceRoot(projectId: string): string {
+  return path.join(resolveStoreWorkspacesRoot(), projectId);
+}
+
 /** Workspace dir for a specific agent within a team pack */
-export function resolveAgentWorkspaceDir(teamId: string, agentId: string): string {
-  return path.join(resolveStoreWorkspacesRoot(), teamId, agentId);
+export function resolveAgentWorkspaceDir(projectId: string, teamId: string, agentId: string): string {
+  return path.join(resolveProjectWorkspaceRoot(projectId), teamId, agentId);
 }
 
 /** Shared memory dir for a team */
-export function resolveSharedMemoryDir(teamId: string): string {
-  return path.join(resolveStoreWorkspacesRoot(), teamId, "shared", "memory");
+export function resolveSharedMemoryDir(projectId: string, teamId: string): string {
+  return path.join(resolveProjectWorkspaceRoot(projectId), teamId, "shared", "memory");
 }
 
 export function resolveStoreRuntimeFile(): string {
@@ -69,6 +73,10 @@ export function resolveTemplatesRoot(): string {
   if (env) return env;
   // src/lib/paths.ts → ../../templates
   return path.resolve(__dirname, "..", "..", "templates");
+}
+
+export function resolveBundledSkillsRoot(): string {
+  return path.resolve(__dirname, "..", "..", "skills");
 }
 
 export function resolveAgentTemplatesDir(): string {
@@ -107,12 +115,12 @@ export function resolveOverlayTemplatesDir(): string | null {
 // ── OpenClaw agent dirs (agent/ entry used by OpenClaw) ─────────────────────
 
 /** The openclaw agent directory for a store-managed agent */
-export function resolveOpenClawAgentDir(teamId: string, agentId: string): string {
-  const safeId = `store__${teamId}__${agentId}`.replace(/[^a-zA-Z0-9_-]/g, "__");
+export function resolveOpenClawAgentDir(projectId: string, teamId: string, agentId: string): string {
+  const safeId = `store__${projectId}__${teamId}__${agentId}`.replace(/[^a-zA-Z0-9_-]/g, "__");
   return path.join(resolveOpenClawStateDir(), "agents", safeId, "agent");
 }
 
 /** Canonical agent ID as registered in openclaw.json */
-export function resolveAgentId(teamId: string, agentId: string): string {
-  return `store__${teamId}__${agentId}`;
+export function resolveAgentId(projectId: string, teamId: string, agentId: string): string {
+  return `store__${projectId}__${teamId}__${agentId}`;
 }

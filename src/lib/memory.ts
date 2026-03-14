@@ -104,11 +104,11 @@ function buildInitialBody(file: SharedMemoryFile): string {
 }
 
 /** Seed all shared memory files for a team */
-export async function seedTeamSharedMemory(teamDef: TeamDef): Promise<void> {
+export async function seedTeamSharedMemory(projectId: string, teamDef: TeamDef): Promise<void> {
   const files = teamDef.shared_memory?.files ?? [];
   if (files.length === 0) return;
 
-  const dir = resolveSharedMemoryDir(teamDef.id);
+  const dir = resolveSharedMemoryDir(projectId, teamDef.id);
   await fs.mkdir(dir, { recursive: true });
 
   for (const file of files) {
@@ -117,8 +117,8 @@ export async function seedTeamSharedMemory(teamDef: TeamDef): Promise<void> {
 }
 
 /** Remove all shared memory files for a team */
-export async function removeTeamSharedMemory(teamDef: TeamDef): Promise<void> {
-  const dir = resolveSharedMemoryDir(teamDef.id);
+export async function removeTeamSharedMemory(projectId: string, teamDef: TeamDef): Promise<void> {
+  const dir = resolveSharedMemoryDir(projectId, teamDef.id);
   try {
     await fs.rm(dir, { recursive: true, force: true });
   } catch {

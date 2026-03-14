@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SkillEntry } from "./schema.js";
-import { resolveStoreRoot } from "./paths.js";
+import { resolveBundledSkillsRoot, resolveStoreRoot } from "./paths.js";
 
 export type SkillInstallResult = {
   skillId: string;
@@ -82,6 +82,8 @@ async function resolveSkillSource(skill: SkillEntry): Promise<string | null> {
       ? path.join(home, skill.source.url.slice(1))
       : skill.source.url;
     if (await pathExists(src)) return src;
+    const bundledSrc = path.isAbsolute(src) ? src : path.join(resolveBundledSkillsRoot(), src);
+    if (await pathExists(bundledSrc)) return bundledSrc;
     return null;
   }
 

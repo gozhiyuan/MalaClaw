@@ -253,7 +253,33 @@ export function renderUser(ctx: RenderContext): string {
   return lines.join("\n") + "\n";
 }
 
-/** Render all 5 bootstrap files for an agent */
+export function renderMemory(ctx: RenderContext): string {
+  const { agent, team } = ctx;
+  const lines = [
+    `# Memory — ${agent.name}`, "",
+    "## Native memory tools (this workspace)",
+    "",
+    "OpenClaw provides `memory_search` and `memory_get` for semantic search over",
+    "files in this agent's workspace directory (MEMORY.md, memory/*.md).",
+    "",
+  ];
+  if (agent.memory?.private_notes) {
+    lines.push("## Private notes", "", `Your private notes: \`${agent.memory.private_notes}\``, "");
+  }
+  if (team.shared_memory?.files?.length) {
+    lines.push(
+      "## Team shared memory",
+      "",
+      "Shared memory files live outside this workspace — access them by file path,",
+      "not via memory_search (which only indexes this agent's workspace).",
+      "",
+      "See AGENTS.md for shared memory file paths and access policies.",
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Render all 6 bootstrap files for an agent */
 export function renderBootstrapFiles(
   agentDef: AgentDef,
   teamDef: TeamDef,
@@ -267,5 +293,6 @@ export function renderBootstrapFiles(
     "TOOLS.md": renderTools(ctx),
     "AGENTS.md": renderAgentsFile(ctx, allMembers),
     "USER.md": renderUser(ctx),
+    "MEMORY.md": renderMemory(ctx),
   };
 }

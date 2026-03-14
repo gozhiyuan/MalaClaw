@@ -110,20 +110,40 @@ function buildAgentEntry(
   workspaceDir: string,
   agentDir: string,
 ): AgentEntry {
-  return {
+  const entry: AgentEntry = {
     id: agentId,
     name: agentDef.name,
     model: agentDef.model.primary,
     workspace: workspaceDir,
     agentDir,
   };
+  if (agentDef.skills !== undefined) {
+    entry.skills = agentDef.skills;
+  }
+  return entry;
+}
+
+export function addSkillsToAgentAllowlists(
+  config: OpenClawConfig,
+  agentIds: string[],
+  skillIds: string[],
+): void {
+  if (skillIds.length === 0 || agentIds.length === 0) return;
+  const list = Array.isArray(config.agents?.list) ? config.agents!.list! : [];
+  for (const entry of list) {
+    if (!agentIds.includes(entry.id as string)) continue;
+    if (!Object.prototype.hasOwnProperty.call(entry, "skills")) continue;
+    const existing = Array.isArray(entry.skills) ? (entry.skills as string[]) : [];
+    entry.skills = uniq([...existing, ...skillIds]);
+  }
 }
 
 function filterStoreAgents(
   list: AgentEntry[],
+  projectId: string,
   teamId: string,
 ): AgentEntry[] {
-  const prefix = resolveAgentId(teamId, "").replace(/__$/, "__");
+  const prefix = resolveAgentId(projectId, teamId, "").replace(/__$/, "__");
   return list.filter((e) => {
     const id = typeof e.id === "string" ? e.id : "";
     return !id.startsWith(prefix);
@@ -144,13 +164,16 @@ export function upsertAgentEntries(
 
 export function removeTeamAgentEntries(
   config: OpenClawConfig,
+  projectId: string,
   teamId: string,
+  agentIds: string[] = [],
 ): AgentEntry[] {
   const list = Array.isArray(config.agents?.list) ? config.agents!.list! : [];
-  const prefix = resolveAgentId(teamId, "").replace(/__$/, "__");
+  const prefix = resolveAgentId(projectId, teamId, "").replace(/__$/, "__");
+  const exactIds = new Set(agentIds);
   const removed = list.filter((e) => {
     const id = typeof e.id === "string" ? e.id : "";
-    return id.startsWith(prefix);
+    return id.startsWith(prefix) || exactIds.has(id);
   });
   if (config.agents) {
     config.agents.list = list.filter((e) => !removed.includes(e));
@@ -164,19 +187,33 @@ const STORE_BLOCK_START = "<!-- openclaw-store -->";
 const STORE_BLOCK_END = "<!-- /openclaw-store -->";
 
 const TOOLS_BLOCK = `${STORE_BLOCK_START}
-# OpenClaw App Store
+# OpenClaw Store
 
-Manage multi-agent teams installed via openclaw-store.
+openclaw-store manages projects, agent teams, and skills on top of OpenClaw.
 
-Commands:
-- List packs:     \`openclaw-store list\`
-- Install:        \`openclaw-store install\`
-- Check health:   \`openclaw-store doctor\`
-- Agent details:  \`openclaw-store agent show <id>\`
-- Team graph:     \`openclaw-store team show <id>\`
+## Quick start
 
-Coordination via shared memory files in ~/.openclaw-store/workspaces/store/.
-Never send direct messages to store-managed agents — use memory files.
+The \`openclaw-store-manager\` skill is available in your workspace.
+Use it to discover and bootstrap projects:
+
+1. \`openclaw-store starter list\` — browse available demo projects
+2. \`openclaw-store starter suggest "<idea>"\` — find the closest starter
+3. \`openclaw-store starter init <id> ./my-project\` — scaffold
+4. \`openclaw-store install\` — provision agents and skills
+
+## CLI reference
+
+- Project status:    \`openclaw-store project status\`
+- Health check:      \`openclaw-store doctor\`
+- Team graph:        \`openclaw-store team show <id>\`
+- Skill status:      \`openclaw-store skill check\`
+
+## Coordination
+
+Store-managed agents communicate via shared memory files in:
+  ~/.openclaw-store/workspaces/store/<project>/<team>/shared/memory/
+
+Never send direct messages to store agents — use memory files.
 ${STORE_BLOCK_END}
 `;
 
@@ -184,16 +221,17 @@ const AGENTS_BLOCK = `${STORE_BLOCK_START}
 # OpenClaw Store — Agent Policy
 
 ## Installed Teams
-Teams installed via openclaw-store. Each team has an entry point agent.
+Teams are installed into project-scoped workspaces via openclaw-store. Each team has an entry point agent.
 
 ## Coordination Rules
 - Use memory files for all inter-agent communication
 - Leads spawn sub-agents for tasks (sessions_spawn)
 - No direct peer messaging (sessions_send = false)
-- Check team's shared memory dir for task queue and status
+- Check the project's team shared memory dir for task queue and status
 
 ## Finding Agents
 \`openclaw-store agent list\` — lists all installed agents
+\`openclaw-store project list\` — lists installed projects and entry points
 \`openclaw-store team show <id>\` — shows team graph and entry point
 ${STORE_BLOCK_END}
 `;
@@ -295,6 +333,7 @@ export async function provisionAgent(params: ProvisionParams): Promise<void> {
 // ── Full install for a team ──────────────────────────────────────────────────
 
 export type InstallTeamParams = {
+  projectId: string;
   teamDef: TeamDef;
   agents: { agentDef: AgentDef; member: TeamMember; workspaceDir: string; agentDir: string }[];
   overwrite?: boolean;
@@ -339,7 +378,7 @@ export async function installTeam(params: InstallTeamParams): Promise<void> {
   const entries: AgentEntry[] = [];
 
   for (const agent of params.agents) {
-    const agentId = resolveAgentId(params.teamDef.id, agent.agentDef.id);
+    const agentId = resolveAgentId(params.projectId, params.teamDef.id, agent.agentDef.id);
     entries.push(
       buildAgentEntry(agentId, agent.agentDef, agent.workspaceDir, agent.agentDir),
     );
@@ -440,10 +479,15 @@ export function planInstallTeam(params: InstallTeamParams): InstallAction[] {
 
 // ── Uninstall a team ─────────────────────────────────────────────────────────
 
-export async function uninstallTeam(teamId: string, workspaceRoot: string): Promise<void> {
+export async function uninstallTeam(
+  projectId: string,
+  teamId: string,
+  workspaceRoot: string,
+  agentIds: string[] = [],
+): Promise<void> {
   const { path: configPath, config } = await readOpenClawConfig();
 
-  const removed = removeTeamAgentEntries(config, teamId);
+  const removed = removeTeamAgentEntries(config, projectId, teamId, agentIds);
   const removedIds = removed
     .map((e) => (typeof e.id === "string" ? e.id : ""))
     .filter(Boolean);

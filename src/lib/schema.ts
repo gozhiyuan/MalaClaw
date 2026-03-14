@@ -164,6 +164,14 @@ export type PackDef = z.infer<typeof PackDef>;
 
 // ── Project manifest (openclaw-store.yaml) ───────────────────────────────────
 
+export const ManifestProject = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  starter: z.string().optional(),
+  entry_team: z.string().optional(),
+});
+
 export const ManifestPackRef = z.object({
   id: z.string(),
   version: z.string().optional(),
@@ -173,18 +181,33 @@ export const ManifestPackRef = z.object({
 export const ManifestSkillRef = z.object({
   id: z.string(),
   env: z.record(z.enum(["required", "optional"])).optional(),
+  targets: z.object({
+    agents: z.array(z.string()).optional(),
+    teams: z.array(z.string()).optional(),
+  }).optional(),
 });
 
 export const Manifest = z.object({
   version: z.number().default(1),
+  project: ManifestProject.optional(),
   packs: z.array(ManifestPackRef).optional().default([]),
   skills: z.array(ManifestSkillRef).optional().default([]),
 });
 
 export type Manifest = z.infer<typeof Manifest>;
 export type ManifestPackRef = z.infer<typeof ManifestPackRef>;
+export type ManifestProject = z.infer<typeof ManifestProject>;
 
 // ── Lockfile (openclaw-store.lock) ───────────────────────────────────────────
+
+export const LockedProject = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  starter: z.string().optional(),
+  entry_team: z.string().optional(),
+  project_dir: z.string().optional(),
+});
 
 export const LockedAgent = z.object({
   id: z.string(),
@@ -195,6 +218,7 @@ export const LockedAgent = z.object({
 export const LockedPack = z.object({
   type: z.literal("pack"),
   id: z.string(),
+  project_id: z.string().optional(),
   source_id: z.string().optional(),
   team_id: z.string().optional(),
   version: z.string(),
@@ -214,11 +238,46 @@ export const LockedSkill = z.object({
 export const Lockfile = z.object({
   version: z.number().default(1),
   generated_at: z.string().optional(),
+  project: LockedProject.optional(),
   packs: z.array(LockedPack).optional().default([]),
   skills: z.array(LockedSkill).optional().default([]),
 });
 
 export type Lockfile = z.infer<typeof Lockfile>;
+export type LockedProject = z.infer<typeof LockedProject>;
 export type LockedPack = z.infer<typeof LockedPack>;
 export type LockedSkill = z.infer<typeof LockedSkill>;
 export type LockedAgent = z.infer<typeof LockedAgent>;
+
+// ── Runtime registry (~/.openclaw-store/runtime.json) ───────────────────────
+
+export const RuntimeEntryPoint = z.object({
+  team_id: z.string(),
+  agent_id: z.string(),
+  openclaw_agent_id: z.string(),
+  agent_name: z.string().optional(),
+});
+
+export const RuntimeProject = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  starter: z.string().optional(),
+  entry_team: z.string().optional(),
+  project_dir: z.string(),
+  manifest_path: z.string().optional(),
+  lockfile_path: z.string().optional(),
+  packs: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
+  entry_points: z.array(RuntimeEntryPoint).default([]),
+  updated_at: z.string(),
+});
+
+export const RuntimeState = z.object({
+  version: z.number().default(1),
+  projects: z.array(RuntimeProject).default([]),
+});
+
+export type RuntimeEntryPoint = z.infer<typeof RuntimeEntryPoint>;
+export type RuntimeProject = z.infer<typeof RuntimeProject>;
+export type RuntimeState = z.infer<typeof RuntimeState>;

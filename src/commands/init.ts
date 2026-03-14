@@ -1,6 +1,7 @@
 import * as p from "@clack/prompts";
 import { loadAllPacks, loadAllSkills, writeManifest } from "../lib/loader.js";
 import { resolveManifestPath } from "../lib/paths.js";
+import { resolveProjectMeta } from "../lib/project-meta.js";
 import fs from "node:fs/promises";
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -28,6 +29,7 @@ export async function runInit(projectDir?: string): Promise<void> {
 
   const packs = await loadAllPacks();
   const skills = await loadAllSkills();
+  const project = resolveProjectMeta(undefined, projectDir);
 
   // Select packs
   const selectedPacks = await p.multiselect({
@@ -67,6 +69,10 @@ export async function runInit(projectDir?: string): Promise<void> {
 
   const manifest = {
     version: 1 as const,
+    project: {
+      id: project.id,
+      name: project.name,
+    },
     packs: (selectedPacks as string[]).map((id) => ({ id })),
     skills: (selectedSkills as string[]).map((id) => ({ id })),
   };
