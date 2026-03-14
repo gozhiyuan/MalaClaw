@@ -4,17 +4,22 @@ name: Inbox De-clutter
 description: Newsletters can take up the inbox like nothing else. Often times
   they pile-up without being opened at all.
 source_usecase: Inbox De-clutter
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/inbox-declutter.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/inbox-declutter.md
+entry_team: automation-ops
 packs:
-  - autonomous-startup
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - clawemail
+installable_skills:
+  - microsoft365
 tags:
   - automation
   - inbox
   - declutter
+required_apis:
+  - Gmail OAuth Setup.
+required_capabilities: []
 external_requirements:
   - Gmail OAuth Setup.
 bootstrap_prompt: Start the Inbox De-clutter demo project from the

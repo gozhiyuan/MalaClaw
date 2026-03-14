@@ -7,18 +7,23 @@ description: Solo founders wear every hat — strategy, development, marketing,
   team of AI agents, each with a distinct role and personality, all controllable
   from a single chat interface?
 source_usecase: Multi-Agent Specialized Team (Solo Founder Setup)
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/multi-agent-team.md
+source_path: ../awesome-openclaw-usecases/usecases/multi-agent-team.md
 entry_team: autonomous-startup
 packs:
   - autonomous-startup
 project_skills:
   - openclaw-store-manager
+installable_skills: []
 tags:
   - automation
   - multi
   - agent
   - team
+required_apis:
+  - telegram skill for the shared control interface
+  - Individual API keys for different model providers (if using mixed models)
+required_capabilities:
+  - sessions_spawn / sessions_send for multi-agent coordination
 external_requirements:
   - telegram skill for the shared control interface
   - sessions_spawn / sessions_send for multi-agent coordination

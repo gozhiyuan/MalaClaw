@@ -5,18 +5,25 @@ description: Managing complex projects with multiple parallel workstreams is
   exhausting. You end up context-switching constantly, tracking status across
   tools, and manually coordinating handoffs.
 source_usecase: Autonomous Project Management with Subagents
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/autonomous-project-management.md
+source_path: ../awesome-openclaw-usecases/usecases/autonomous-project-management.md
 entry_team: dev-company
 packs:
   - dev-company
 project_skills:
   - openclaw-store-manager
+  - github
+installable_skills:
+  - brainz-tasks
 tags:
   - development
   - autonomous
   - project
   - management
+required_apis: []
+required_capabilities:
+  - sessions_spawn / sessions_send for subagent management
+  - File system access for STATE.yaml
+  - Git for state versioning (optional but recommended)
 external_requirements:
   - sessions_spawn / sessions_send for subagent management
   - File system access for STATE.yaml

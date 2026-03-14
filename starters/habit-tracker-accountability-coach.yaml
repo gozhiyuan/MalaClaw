@@ -7,19 +7,30 @@ description: You've tried every habit tracker app out there. They all work for a
   asked how your day went, and adapted its approach based on whether you're on a
   streak or falling off?
 source_usecase: Habit Tracker & Accountability Coach
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/habit-tracker-accountability-coach.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/habit-tracker-accountability-coach.md
+entry_team: personal-assistant
 packs:
-  - autonomous-startup
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+  - brainz-tasks
+  - apple-reminders
+installable_skills:
+  - publora-telegram
 tags:
   - automation
   - habit
   - tracker
   - accountability
   - coach
+required_apis:
+  - Telegram or SMS integration (Twilio for SMS, or Telegram Bot API)
+  - "Optional: Google Sheets integration for a visual habit dashboard"
+  - Telegram Bot API
+  - Twilio SMS API
+  - Google Sheets API
+required_capabilities:
+  - Scheduling / cron for timed check-ins
 external_requirements:
   - Telegram or SMS integration (Twilio for SMS, or Telegram Bot API)
   - Scheduling / cron for timed check-ins

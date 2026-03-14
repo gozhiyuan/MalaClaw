@@ -8,19 +8,29 @@ description: Modern families juggle five or more calendars — work, personal,
   appointment scheduling) happens through scattered text messages that get
   buried.
 source_usecase: Family Calendar Aggregation & Household Assistant
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/family-calendar-household-assistant.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/family-calendar-household-assistant.md
+entry_team: personal-assistant
 packs:
-  - autonomous-startup
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+installable_skills:
+  - google-calendar
+  - apple-calendar
+  - publora-telegram
+  - clawemail
 tags:
   - automation
   - family
   - calendar
   - household
   - assistant
+required_apis:
+  - Calendar API access (Google Calendar, Apple Calendar via ical)
+  - Telegram or Slack for the shared family chat interface
+  - Google Calendar API
+required_capabilities:
+  - File system access for inventory tracking
 external_requirements:
   - Calendar API access (Google Calendar, Apple Calendar via ical)
   - imessage skill for message monitoring (macOS only)

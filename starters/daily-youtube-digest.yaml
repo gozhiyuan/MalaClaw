@@ -5,18 +5,27 @@ description: Start your day with a personalized summary of new videos from your
   favorite YouTube channels — no more missing content from creators you actually
   want to follow.
 source_usecase: Daily YouTube Digest
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/daily-youtube-digest.md
+source_path: ../awesome-openclaw-usecases/usecases/daily-youtube-digest.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - youtube-pro
+installable_skills:
+  - rss-skill
 tags:
   - content
   - daily
   - youtube
   - digest
+required_apis:
+  - That's it. The agent handles the rest — including account creation and API
+    key setup. You get **100 free credits on signup**, no credit card required.
+  - "> Note: After creating the account, the skill auto-stores the API key
+    securely in correct locations based on the OS, so the API will work in all
+    contexts."
+required_capabilities: []
 external_requirements:
   - Install the youtube-full skill.
   - "Just tell your OpenClaw:"

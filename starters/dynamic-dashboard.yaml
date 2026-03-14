@@ -5,17 +5,26 @@ description: Static dashboards show stale data and require constant manual
   updates. You want real-time visibility across multiple data sources without
   building a custom frontend or hitting API rate limits.
 source_usecase: Dynamic Dashboard with Sub-agent Spawning
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/dynamic-dashboard.md
-entry_team: dev-company
+source_path: ../awesome-openclaw-usecases/usecases/dynamic-dashboard.md
+entry_team: data-ops
 packs:
-  - dev-company
+  - data-ops
 project_skills:
   - openclaw-store-manager
+  - duckdb-en
+installable_skills:
+  - nocodb
+  - github
 tags:
   - development
   - dynamic
   - dashboard
+required_apis:
+  - web_search or web_fetch for external APIs
+  - Discord or Canvas for rendering the dashboard
+required_capabilities:
+  - github (gh CLI) for GitHub metrics
+  - Cron jobs for scheduled updates
 external_requirements:
   - Sub-agent spawning for parallel execution
   - github (gh CLI) for GitHub metrics

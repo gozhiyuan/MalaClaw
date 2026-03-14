@@ -8,18 +8,23 @@ description: Use OpenClaw from a desktop Cowork UI, access it from Telegram or
   deployment expert** for install, diagnose, and repair — including **remote
   rescue** when OpenClaw is down and you’re not at the machine.
 source_usecase: OpenClaw as Desktop Cowork (AionUi) — Remote Rescue & Multi-Agent Hub
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/aionui-cowork-desktop.md
+source_path: ../awesome-openclaw-usecases/usecases/aionui-cowork-desktop.md
 entry_team: autonomous-startup
 packs:
   - autonomous-startup
 project_skills:
   - openclaw-store-manager
+installable_skills: []
+
 tags:
   - automation
   - aionui
   - cowork
   - desktop
+required_apis:
+  - API keys or auth for your models (OpenClaw config + any built-in agent keys
+    in AionUi).
+required_capabilities: []
 external_requirements:
   - "**OpenClaw** (e.g. npm install -g openclaw@latest). AionUi’s **OpenClaw
     Setup** assistant can guide install, gateway, and config."

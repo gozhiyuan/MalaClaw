@@ -6,18 +6,24 @@ description: OpenClaw's built-in memory system stores everything as markdown
   from last Tuesday becomes impossible. There is no search, just scrolling
   through files.
 source_usecase: Semantic Memory Search
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/semantic-memory-search.md
-entry_team: research-lab
+source_path: ../awesome-openclaw-usecases/usecases/semantic-memory-search.md
+entry_team: data-ops
 packs:
-  - research-lab
+  - data-ops
 project_skills:
   - openclaw-store-manager
+  - duckdb-en
+installable_skills:
+  - nocodb
+  - aluvia-brave-search
 tags:
   - research
   - semantic
   - memory
   - search
+required_apis:
+  - memsearch Documentation — full CLI reference, Python API, and architecture
+required_capabilities: []
 external_requirements:
   - No OpenClaw skills required — memsearch is a standalone Python CLI/library
   - Python 3.10+ with pip or uv

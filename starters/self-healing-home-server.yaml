@@ -5,19 +5,25 @@ description: Running a home server means being on-call 24/7 for your own
   infrastructure. Services go down at 3 AM, certificates expire silently, disk
   fills up, and pods crash-loop — all while you're asleep or away.
 source_usecase: Self-Healing Home Server & Infrastructure Management
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/self-healing-home-server.md
+source_path: ../awesome-openclaw-usecases/usecases/self-healing-home-server.md
 entry_team: dev-company
 packs:
   - dev-company
 project_skills:
   - openclaw-store-manager
+  - agentic-devops
+installable_skills:
+  - publora-telegram
 tags:
   - development
   - self
   - healing
   - home
   - server
+required_apis:
+  - Calendar API access
+required_capabilities:
+  - ssh access to home network machines
 external_requirements:
   - ssh access to home network machines
   - kubectl for Kubernetes cluster management

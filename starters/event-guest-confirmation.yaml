@@ -7,18 +7,27 @@ description: "You're hosting an event — a dinner party, a wedding, a company
   lose track of dietary restrictions or plus-ones. Texting works sometimes, but
   people ignore messages. A real phone call gets a much higher response rate."
 source_usecase: Event Guest Confirmation
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/event-guest-confirmation.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/event-guest-confirmation.md
+entry_team: automation-ops
 packs:
-  - autonomous-startup
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - clawemail
+installable_skills:
+  - google-calendar
+  - publora-telegram
 tags:
   - automation
   - event
   - guest
   - confirmation
+required_apis:
+  - An OpenAI API key (for the GPT-4o Realtime voice AI)
+  - ngrok (for webhook tunneling — free tier works)
+  - OpenAI Realtime API
+required_capabilities:
+  - ngrok (for webhook tunneling — free tier works)
 external_requirements:
   - SuperCall — install via openclaw plugins install @xonder/supercall
   - A Twilio account with a phone number (for making outbound calls)

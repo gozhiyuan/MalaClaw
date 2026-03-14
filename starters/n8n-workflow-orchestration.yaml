@@ -6,18 +6,28 @@ description: Letting your AI agent directly manage API keys and call external
   another credential in `.env.local`, another surface for the agent to
   accidentally leak or misuse.
 source_usecase: OpenClaw + n8n Workflow Orchestration
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/n8n-workflow-orchestration.md
-entry_team: dev-company
+source_path: ../awesome-openclaw-usecases/usecases/n8n-workflow-orchestration.md
+entry_team: automation-ops
 packs:
-  - dev-company
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - n8n
+installable_skills:
+  - github
+  - agentic-devops
 tags:
   - development
   - n8n
   - workflow
   - orchestration
+required_apis:
+  - n8n API access (for creating/triggering workflows)
+  - fetch or curl for webhook calls
+  - n8n credential management (manual, one-time setup per integration)
+  - n8n Webhook Trigger Docs
+required_capabilities:
+  - fetch or curl for webhook calls
 external_requirements:
   - n8n API access (for creating/triggering workflows)
   - fetch or curl for webhook calls

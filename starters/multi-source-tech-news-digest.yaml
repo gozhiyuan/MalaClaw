@@ -5,14 +5,16 @@ description: Automatically aggregate, score, and deliver tech news from 109+
   sources across RSS, Twitter/X, GitHub releases, and web search — all managed
   through natural language.
 source_usecase: Multi-Source Tech News Digest
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/multi-source-tech-news-digest.md
+source_path: ../awesome-openclaw-usecases/usecases/multi-source-tech-news-digest.md
 entry_team: research-lab
 packs:
   - research-lab
-  - content-factory
 project_skills:
   - openclaw-store-manager
+  - rss-skill
+  - aluvia-brave-search
+installable_skills:
+  - arxiv-watcher
 tags:
   - research
   - content
@@ -21,6 +23,8 @@ tags:
   - tech
   - news
   - digest
+required_apis: []
+required_capabilities: []
 external_requirements:
   - tech-news-digest — Install via clawhub install tech-news-digest
   - gog (optional) — For email delivery via Gmail

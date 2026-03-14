@@ -6,16 +6,25 @@ description: You're a content creator juggling research, writing, and design
   scripts, generating thumbnails — eats hours of your day. What if a team of
   specialized agents handled all of it overnight?
 source_usecase: Multi-Agent Content Factory
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/content-factory.md
+source_path: ../awesome-openclaw-usecases/usecases/content-factory.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - fal-ai
+installable_skills:
+  - social-intelligence
+  - x-research-but-cheaper
 tags:
   - content
   - factory
+required_apis:
+  - Discord integration with multiple channels
+  - Local image generation (e.g., Nano Banana) or an image generation API
+  - Discord Bot Setup
+required_capabilities:
+  - sessions_spawn / sessions_send for multi-agent orchestration
 external_requirements:
   - Discord integration with multiple channels
   - sessions_spawn / sessions_send for multi-agent orchestration

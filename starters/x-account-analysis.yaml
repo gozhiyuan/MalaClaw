@@ -5,18 +5,24 @@ description: There are many websites designed to give you a qualitative analysis
   of your X account. While X already gives you an **analytics** section, it's
   more focused to show your numbers on your performance.
 source_usecase: X Account Analysis
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/x-account-analysis.md
+source_path: ../awesome-openclaw-usecases/usecases/x-account-analysis.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - x-research-but-cheaper
+installable_skills:
+  - social-intelligence
 tags:
   - content
   - x
   - account
   - analysis
+required_apis:
+  - For security and isolation, you better create a new account for your
+    ClawdBot.
+required_capabilities: []
 external_requirements:
   - Bird Skill. clawhub install bird (it comes pre-bundled)
 bootstrap_prompt: Start the X Account Analysis demo project from the

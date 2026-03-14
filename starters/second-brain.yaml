@@ -6,17 +6,25 @@ description: You come up with ideas, find interesting links, hear about books to
   complex, Apple Notes becomes a graveyard of 10,000 unread entries. You need
   something as simple as texting a friend.
 source_usecase: Second Brain
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/second-brain.md
-entry_team: research-lab
+source_path: ../awesome-openclaw-usecases/usecases/second-brain.md
+entry_team: personal-assistant
 packs:
-  - research-lab
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+  - danube
+installable_skills:
+  - duckdb-en
+  - rss-skill
 tags:
   - research
   - second
   - brain
+required_apis:
+  - Telegram, iMessage, or Discord integration (for text-based capture)
+  - "Start using it immediately — just text your bot anything you want to
+    remember:"
+required_capabilities: []
 external_requirements:
   - Telegram, iMessage, or Discord integration (for text-based capture)
   - Next.js (OpenClaw builds this for you — no coding needed)

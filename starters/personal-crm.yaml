@@ -5,17 +5,23 @@ description: Keeping track of who you've met, when, and what you discussed is
   impossible to do manually. Important follow-ups slip through the cracks, and
   you forget context before important meetings.
 source_usecase: Personal CRM with Automatic Contact Discovery
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/personal-crm.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/personal-crm.md
+entry_team: personal-assistant
 packs:
-  - autonomous-startup
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+  - clawemail
+  - apple-contacts
+installable_skills:
+  - danube
 tags:
   - automation
   - personal
   - crm
+required_apis:
+  - Telegram topic for CRM queries
+required_capabilities: []
 external_requirements:
   - gog CLI (for Gmail and Google Calendar)
   - Custom CRM database (SQLite or similar) or use the crm-query skill if

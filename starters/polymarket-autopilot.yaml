@@ -5,17 +5,25 @@ description: Manually monitoring prediction markets for arbitrage opportunities
   and executing trades is time-consuming and requires constant attention. You
   want to test and refine trading strategies without risking real capital.
 source_usecase: "Polymarket Autopilot: Automated Paper Trading"
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/polymarket-autopilot.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/polymarket-autopilot.md
+entry_team: finance-ops
 packs:
-  - autonomous-startup
+  - finance-ops
 project_skills:
   - openclaw-store-manager
+  - reef-polymarket-research
+installable_skills:
+  - aluvia-brave-search
 tags:
   - automation
   - polymarket
   - autopilot
+required_apis:
+  - web_search or web_fetch (for Polymarket API data)
+  - Discord integration for daily reports
+  - Polymarket API
+required_capabilities:
+  - Cron jobs for continuous monitoring
 external_requirements:
   - web_search or web_fetch (for Polymarket API data)
   - postgres or SQLite for trade logs and portfolio tracking

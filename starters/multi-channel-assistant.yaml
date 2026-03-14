@@ -5,18 +5,29 @@ description: Context-switching between apps to manage tasks, schedule events,
   send messages, and track work is exhausting. You want one interface that
   routes to all your tools.
 source_usecase: Multi-Channel Personal Assistant
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/multi-channel-assistant.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/multi-channel-assistant.md
+entry_team: automation-ops
 packs:
-  - autonomous-startup
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - clawemail
+  - connect-apps
+installable_skills:
+  - publora-telegram
+  - microsoft365
 tags:
   - automation
   - multi
   - channel
   - assistant
+required_apis:
+  - Slack integration (bot + user tokens)
+  - Todoist API or skill
+  - Asana API or skill
+  - Telegram channel with multiple topics configured
+  - config — bot settings and debugging
+required_capabilities: []
 external_requirements:
   - gog CLI (Google Workspace)
   - Slack integration (bot + user tokens)

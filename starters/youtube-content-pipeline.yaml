@@ -5,17 +5,23 @@ description: As a daily YouTube creator, finding fresh, timely video ideas
   across the web and X/Twitter is time-consuming. Tracking what you've already
   covered prevents duplicates and helps you stay ahead of trends.
 source_usecase: YouTube Content Pipeline
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/youtube-content-pipeline.md
+source_path: ../awesome-openclaw-usecases/usecases/youtube-content-pipeline.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - youtube-pro
+installable_skills:
+  - fal-ai
 tags:
   - content
   - youtube
   - pipeline
+required_apis:
+  - Asana integration (or Todoist)
+  - Telegram topic for receiving pitches
+required_capabilities: []
 external_requirements:
   - web_search (built-in)
   - x-research-v2 or custom X/Twitter search skill

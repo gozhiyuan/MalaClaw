@@ -7,18 +7,27 @@ description: You have a podcast idea, maybe even a backlog of episode topics.
   overhead kills your momentum. What if you handed off a topic and got back a
   full production package?
 source_usecase: Podcast Production Pipeline
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/podcast-production-pipeline.md
+source_path: ../awesome-openclaw-usecases/usecases/podcast-production-pipeline.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - rss-skill
+installable_skills:
+  - aluvia-brave-search
+  - faster-whisper
 tags:
   - content
   - podcast
   - production
   - pipeline
+required_apis:
+  - Slack, Discord, or Telegram integration (for delivering assets)
+required_capabilities:
+  - File system access (for reading transcripts and writing output files)
+  - "Optional: sessions_spawn for running research and writing agents in
+    parallel"
 external_requirements:
   - Web search / research skill (for guest research and topic deep-dives)
   - File system access (for reading transcripts and writing output files)

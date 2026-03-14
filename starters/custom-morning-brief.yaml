@@ -6,20 +6,27 @@ description: You wake up and spend the first 30 minutes of your day catching up
   figure out what matters today. What if all of that was already done and
   waiting for you as a text message?
 source_usecase: Custom Morning Brief
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/custom-morning-brief.md
+source_path: ../awesome-openclaw-usecases/usecases/custom-morning-brief.md
 entry_team: research-lab
 packs:
   - research-lab
-  - content-factory
 project_skills:
   - openclaw-store-manager
+  - aluvia-brave-search
+installable_skills:
+  - social-intelligence
+  - rss-skill
+  - publora-telegram
 tags:
   - research
   - content
   - custom
   - morning
   - brief
+required_apis:
+  - Telegram, Discord, or iMessage integration
+  - Todoist / Apple Reminders / Asana integration (whichever you use for tasks)
+required_capabilities: []
 external_requirements:
   - Telegram, Discord, or iMessage integration
   - Todoist / Apple Reminders / Asana integration (whichever you use for tasks)

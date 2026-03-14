@@ -5,19 +5,25 @@ description: Your AI agent is powerful but reactive — it only works when you
   tell it what to do. What if it knew your goals and proactively came up with
   tasks to move you closer to them every single day, without being asked?
 source_usecase: Goal-Driven Autonomous Tasks
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/overnight-mini-app-builder.md
+source_path: ../awesome-openclaw-usecases/usecases/overnight-mini-app-builder.md
 entry_team: autonomous-startup
 packs:
   - autonomous-startup
 project_skills:
   - openclaw-store-manager
+  - github
+installable_skills:
+  - agentic-devops
 tags:
   - automation
   - overnight
   - mini
   - app
   - builder
+required_apis:
+  - Telegram or Discord integration
+required_capabilities:
+  - sessions_spawn / sessions_send for autonomous task execution
 external_requirements:
   - Telegram or Discord integration
   - sessions_spawn / sessions_send for autonomous task execution

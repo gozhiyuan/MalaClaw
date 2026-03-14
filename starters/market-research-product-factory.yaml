@@ -6,20 +6,24 @@ description: You want to build a product but don't know what to build. Or you
   with. This workflow uses the Last 30 Days skill to mine Reddit and X for real
   pain points, then has OpenClaw build solutions to those problems.
 source_usecase: Market Research & Product Factory
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/market-research-product-factory.md
+source_path: ../awesome-openclaw-usecases/usecases/market-research-product-factory.md
 entry_team: research-lab
 packs:
   - research-lab
-  - content-factory
 project_skills:
   - openclaw-store-manager
+  - aluvia-brave-search
+installable_skills:
+  - social-intelligence
 tags:
   - research
   - content
   - market
   - product
   - factory
+required_apis:
+  - Telegram or Discord integration for receiving research reports
+required_capabilities: []
 external_requirements:
   - Last 30 Days skill by Matt Van Horde
   - Telegram or Discord integration for receiving research reports

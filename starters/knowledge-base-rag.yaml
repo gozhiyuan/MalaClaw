@@ -4,18 +4,24 @@ name: Personal Knowledge Base (RAG)
 description: You read articles, tweets, and watch videos all day but can never
   find that one thing you saw last week. Bookmarks pile up and become useless.
 source_usecase: Personal Knowledge Base (RAG)
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/knowledge-base-rag.md
-entry_team: research-lab
+source_path: ../awesome-openclaw-usecases/usecases/knowledge-base-rag.md
+entry_team: data-ops
 packs:
-  - research-lab
+  - data-ops
 project_skills:
   - openclaw-store-manager
+  - duckdb-en
+  - nocodb
+installable_skills:
+  - aluvia-brave-search
 tags:
   - research
   - knowledge
   - base
   - rag
+required_apis:
+  - Telegram topic or Slack channel for ingestion
+required_capabilities: []
 external_requirements:
   - knowledge-base skill (or build custom RAG with embeddings)
   - web_fetch (built-in)

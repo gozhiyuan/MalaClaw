@@ -6,18 +6,24 @@ description: Your agent already monitors things for you — stocks, emails, smar
   pile up. Chat messages get buried. For the stuff that actually matters, you
   need something you can't swipe away.
 source_usecase: Phone Call Notifications
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/phone-call-notifications.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/phone-call-notifications.md
+entry_team: automation-ops
 packs:
-  - autonomous-startup
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - outbound-call
+installable_skills:
+  - clawemail
 tags:
   - automation
   - phone
   - call
   - notifications
+required_apis:
+  - That's it. No other dependencies. The setup prompt includes the API key and
+    links to skill docs — the agent reads them and figures out the rest.
+required_capabilities: []
 external_requirements:
   - clawr.ing — install by pasting the setup prompt from the clawr.ing dashboard
     into your OpenClaw chat. No CLI install needed.

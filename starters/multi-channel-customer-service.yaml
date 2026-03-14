@@ -5,19 +5,34 @@ description: Small businesses juggle WhatsApp, Instagram DMs, emails, and Google
   Reviews across multiple apps. Customers expect instant responses 24/7, but
   hiring staff for round-the-clock coverage is expensive.
 source_usecase: Multi-Channel AI Customer Service Platform
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/multi-channel-customer-service.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/multi-channel-customer-service.md
+entry_team: customer-service
 packs:
-  - autonomous-startup
+  - customer-service
 project_skills:
   - openclaw-store-manager
+  - clawemail
+  - connect-apps
+installable_skills:
+  - publora-telegram
+  - microsoft365
 tags:
   - automation
   - multi
   - channel
   - customer
   - service
+required_apis:
+  - WhatsApp Business API integration
+  - Instagram Graph API (via Meta Business)
+  - Google Business Profile API for reviews
+  - WhatsApp Business API (through 360dialog or official API)
+  - Gmail via gog OAuth
+  - Google Business Profile API token
+  - WhatsApp Business API
+  - Instagram Messaging API
+  - Google Business Profile API
+required_capabilities: []
 external_requirements:
   - WhatsApp Business API integration
   - Instagram Graph API (via Meta Business)

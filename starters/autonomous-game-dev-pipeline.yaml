@@ -7,19 +7,24 @@ description: '**The Origin Story:** A "LANero of the old school" dad wanted to
   aggressive ads, and deceptive buttons (dark patterns) that frustrated his
   toddler.'
 source_usecase: Autonomous Educational Game Development Pipeline
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/autonomous-game-dev-pipeline.md
+source_path: ../awesome-openclaw-usecases/usecases/autonomous-game-dev-pipeline.md
 entry_team: dev-company
 packs:
   - dev-company
 project_skills:
   - openclaw-store-manager
+  - github
+installable_skills:
+  - agentic-devops
 tags:
   - development
   - autonomous
   - game
   - dev
   - pipeline
+required_apis: []
+required_capabilities:
+  - "**Git**: To manage branches, commits, and merges."
 external_requirements:
   - "**Git**: To manage branches, commits, and merges."
 bootstrap_prompt: Start the Autonomous Educational Game Development Pipeline

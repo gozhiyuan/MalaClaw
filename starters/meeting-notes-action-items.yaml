@@ -6,19 +6,34 @@ description: You just finished a 45-minute team call. Now you need to write up
   Todoist — manually. By the time you're done, the next meeting is starting.
   What if your agent handled all of that the moment the transcript lands?
 source_usecase: Automated Meeting Notes & Action Items
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/meeting-notes-action-items.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/meeting-notes-action-items.md
+entry_team: personal-assistant
 packs:
-  - autonomous-startup
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+  - faster-whisper
+installable_skills:
+  - google-calendar
+  - clawemail
 tags:
   - automation
   - meeting
   - notes
   - action
   - items
+required_apis:
+  - Jira, Linear, Todoist, or Notion integration (for task creation)
+  - Slack or Discord integration (for posting summaries)
+  - "Optional: Otter.ai, Fireflies.ai, or Google Meet API for automatic
+    transcript retrieval"
+  - Otter.ai API
+  - Jira REST API
+  - Linear API
+  - Slack API
+required_capabilities:
+  - File system access (for reading transcript files)
+  - Scheduling / cron (for follow-up reminders)
 external_requirements:
   - Jira, Linear, Todoist, or Notion integration (for task creation)
   - Slack or Discord integration (for posting summaries)

@@ -5,19 +5,24 @@ description: You want to access your AI agent from any phone without needing a
   smartphone app or internet browser. You need hands-free voice assistance while
   driving, walking, or when your hands are occupied.
 source_usecase: Phone-Based Personal Assistant
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/phone-based-personal-assistant.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/phone-based-personal-assistant.md
+entry_team: automation-ops
 packs:
-  - autonomous-startup
+  - automation-ops
 project_skills:
   - openclaw-store-manager
+  - outbound-call
+installable_skills:
+  - publora-telegram
 tags:
   - automation
   - phone
   - based
   - personal
   - assistant
+required_apis:
+  - Telnyx API
+required_capabilities: []
 external_requirements:
   - ClawdTalk
   - Calendar skill (Google Calendar or Outlook)

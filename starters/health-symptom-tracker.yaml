@@ -5,18 +5,24 @@ description: Identifying food sensitivities requires consistent logging over
   time, which is tedious to maintain. You need reminders to log and analysis to
   spot patterns.
 source_usecase: Health & Symptom Tracker
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/health-symptom-tracker.md
-entry_team: autonomous-startup
+source_path: ../awesome-openclaw-usecases/usecases/health-symptom-tracker.md
+entry_team: personal-assistant
 packs:
-  - autonomous-startup
+  - personal-assistant
 project_skills:
   - openclaw-store-manager
+  - apple-health-skill
+installable_skills:
+  - apple-reminders
 tags:
   - automation
   - health
   - symptom
   - tracker
+required_apis:
+  - Telegram topic for logging
+required_capabilities:
+  - Cron jobs for reminders
 external_requirements:
   - Cron jobs for reminders
   - Telegram topic for logging

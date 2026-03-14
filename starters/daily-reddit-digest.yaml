@@ -4,18 +4,23 @@ name: Daily Reddit Digest
 description: Run a daily digest everyday to give you the top performing posts
   from your favourite subreddits.
 source_usecase: Daily Reddit Digest
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/daily-reddit-digest.md
+source_path: ../awesome-openclaw-usecases/usecases/daily-reddit-digest.md
 entry_team: content-factory
 packs:
   - content-factory
 project_skills:
   - openclaw-store-manager
+  - social-intelligence
+installable_skills:
+  - rss-skill
 tags:
   - content
   - daily
   - reddit
   - digest
+required_apis:
+  - reddit-readonly skill. It doesn't need auth.
+required_capabilities: []
 external_requirements:
   - reddit-readonly skill. It doesn't need auth.
 bootstrap_prompt: Start the Daily Reddit Digest demo project from the

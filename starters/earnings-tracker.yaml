@@ -5,17 +5,24 @@ description: Following earnings season across dozens of tech companies means
   checking multiple sources and remembering report dates. You want to stay on
   top of AI/tech earnings without manually tracking every company.
 source_usecase: AI-Powered Earnings Tracker
-source_path: /Users/ll/Documents/Zhiyuan
-  Liu/github/openclaw-dir/awesome-openclaw-usecases/usecases/earnings-tracker.md
-entry_team: research-lab
+source_path: ../awesome-openclaw-usecases/usecases/earnings-tracker.md
+entry_team: finance-ops
 packs:
-  - research-lab
+  - finance-ops
 project_skills:
   - openclaw-store-manager
+  - aluvia-brave-search
+installable_skills:
+  - social-intelligence
+  - publora-telegram
 tags:
   - research
   - earnings
   - tracker
+required_apis:
+  - Telegram topic for earnings updates
+required_capabilities:
+  - Cron job support in OpenClaw
 external_requirements:
   - web_search (built-in)
   - Cron job support in OpenClaw
