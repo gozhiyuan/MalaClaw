@@ -1,0 +1,35 @@
+id: automation-ops
+name: "Automation Ops"
+version: 1
+
+members:
+  - agent: automation-lead
+    role: lead
+    entry_point: true
+  - agent: communications-agent
+    role: specialist
+  - agent: integration-specialist
+    role: specialist
+  - agent: notification-agent
+    role: specialist
+
+graph:
+  - from: automation-lead
+    to: communications-agent
+    relationship: delegates_to
+  - from: automation-lead
+    to: integration-specialist
+    relationship: delegates_to
+  - from: automation-lead
+    to: notification-agent
+    relationship: delegates_to
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/automation-ops/shared/memory/"
+  files:
+    - path: workflow-state.md
+      access: single-writer
+      writer: automation-lead
+    - path: event-log.md
+      access: append-only
+      writer: "*"

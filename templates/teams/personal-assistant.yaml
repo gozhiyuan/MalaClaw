@@ -1,0 +1,35 @@
+id: personal-assistant
+name: "Personal Assistant"
+version: 1
+
+members:
+  - agent: personal-assistant-lead
+    role: lead
+    entry_point: true
+  - agent: life-organizer
+    role: specialist
+  - agent: health-wellness-tracker
+    role: specialist
+  - agent: knowledge-manager
+    role: specialist
+
+graph:
+  - from: personal-assistant-lead
+    to: life-organizer
+    relationship: delegates_to
+  - from: personal-assistant-lead
+    to: health-wellness-tracker
+    relationship: delegates_to
+  - from: personal-assistant-lead
+    to: knowledge-manager
+    relationship: delegates_to
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/personal-assistant/shared/memory/"
+  files:
+    - path: daily-brief.md
+      access: single-writer
+      writer: personal-assistant-lead
+    - path: action-log.md
+      access: append-only
+      writer: "*"

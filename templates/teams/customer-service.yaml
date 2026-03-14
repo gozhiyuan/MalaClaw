@@ -1,0 +1,38 @@
+id: customer-service
+name: "Customer Service"
+version: 1
+
+members:
+  - agent: service-lead
+    role: lead
+    entry_point: true
+  - agent: response-agent
+    role: specialist
+  - agent: channel-coordinator
+    role: specialist
+  - agent: escalation-reviewer
+    role: reviewer
+
+graph:
+  - from: service-lead
+    to: response-agent
+    relationship: delegates_to
+  - from: service-lead
+    to: channel-coordinator
+    relationship: delegates_to
+  - from: response-agent
+    to: escalation-reviewer
+    relationship: requests_review
+  - from: service-lead
+    to: escalation-reviewer
+    relationship: requests_review
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/customer-service/shared/memory/"
+  files:
+    - path: ticket-queue.md
+      access: single-writer
+      writer: service-lead
+    - path: response-log.md
+      access: append-only
+      writer: "*"

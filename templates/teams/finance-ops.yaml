@@ -1,0 +1,38 @@
+id: finance-ops
+name: "Finance Ops"
+version: 1
+
+members:
+  - agent: finance-lead
+    role: lead
+    entry_point: true
+  - agent: market-analyst
+    role: specialist
+  - agent: trade-executor
+    role: specialist
+  - agent: risk-reviewer
+    role: reviewer
+
+graph:
+  - from: finance-lead
+    to: market-analyst
+    relationship: delegates_to
+  - from: finance-lead
+    to: trade-executor
+    relationship: delegates_to
+  - from: trade-executor
+    to: risk-reviewer
+    relationship: requests_review
+  - from: finance-lead
+    to: risk-reviewer
+    relationship: requests_review
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/finance-ops/shared/memory/"
+  files:
+    - path: portfolio-state.md
+      access: single-writer
+      writer: finance-lead
+    - path: trade-log.md
+      access: append-only
+      writer: "*"

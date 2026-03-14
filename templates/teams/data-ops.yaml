@@ -1,0 +1,35 @@
+id: data-ops
+name: "Data Ops"
+version: 1
+
+members:
+  - agent: data-lead
+    role: lead
+    entry_point: true
+  - agent: data-engineer
+    role: specialist
+  - agent: analytics-agent
+    role: specialist
+  - agent: storage-manager
+    role: specialist
+
+graph:
+  - from: data-lead
+    to: data-engineer
+    relationship: delegates_to
+  - from: data-lead
+    to: analytics-agent
+    relationship: delegates_to
+  - from: data-lead
+    to: storage-manager
+    relationship: delegates_to
+
+shared_memory:
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/data-ops/shared/memory/"
+  files:
+    - path: pipeline-state.md
+      access: single-writer
+      writer: data-lead
+    - path: pipeline-log.md
+      access: append-only
+      writer: "*"
