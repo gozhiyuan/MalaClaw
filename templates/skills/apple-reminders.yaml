@@ -1,0 +1,23 @@
+id: apple-reminders
+version: 1
+name: "Apple Reminders"
+description: "Manage Apple Reminders via remindctl CLI — list, add, edit, complete, delete reminders"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/steipete/apple-reminders"
+  pin: "latest"
+
+trust_tier: community
+
+requires:
+  bins:
+    - remindctl
+  env: []
+
+disabled_until_configured: false
+
+install_hints:
+  - "Requires macOS with Reminders.app"
+  - "Install remindctl: brew install remindctl (or follow skill README)"
+  - "Grant reminders access permissions when prompted"

@@ -1,0 +1,28 @@
+id: google-calendar
+version: 1
+name: "Google Calendar"
+description: "Full Google Calendar integration — read, create, update, and delete events"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/adrianmiller99/google-calendar"
+  pin: "latest"
+
+trust_tier: community
+
+requires:
+  bins: []
+  env:
+    - key: GOOGLE_CLIENT_ID
+      description: "Google OAuth2 client ID (same credentials as clawemail if both used)"
+      required: true
+    - key: GOOGLE_CLIENT_SECRET
+      description: "Google OAuth2 client secret"
+      required: true
+
+disabled_until_configured: true
+
+install_hints:
+  - "Enable Google Calendar API in your Google Cloud project"
+  - "Reuse GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET from clawemail if already set"
+  - "Then re-run: openclaw-store install"

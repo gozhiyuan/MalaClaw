@@ -1,0 +1,21 @@
+id: apple-calendar
+version: 1
+name: "Apple Calendar"
+description: "Apple Calendar.app integration for macOS — read and create calendar events"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/tyler6204/apple-calendar"
+  pin: "latest"
+
+trust_tier: community
+
+requires:
+  bins: []
+  env: []
+
+disabled_until_configured: false
+
+install_hints:
+  - "Requires macOS with Calendar.app installed"
+  - "Grant calendar access permissions when prompted"

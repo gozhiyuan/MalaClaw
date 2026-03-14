@@ -1,0 +1,25 @@
+id: brainz-tasks
+version: 1
+name: "Brainz Tasks (Todoist)"
+description: "Manage Todoist tasks using the todoist CLI — add, complete, list, and filter tasks"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/xejrax/brainz-tasks"
+  pin: "latest"
+
+trust_tier: community
+
+requires:
+  bins: []
+  env:
+    - key: TODOIST_API_TOKEN
+      description: "Todoist API token for task management"
+      required: true
+
+disabled_until_configured: true
+
+install_hints:
+  - "Get your Todoist API token at todoist.com/app/settings/integrations/developer"
+  - "Set: export TODOIST_API_TOKEN=..."
+  - "Then re-run: openclaw-store install"
