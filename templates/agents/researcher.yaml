@@ -40,6 +40,9 @@ capabilities:
 
 skills:
   - last30days
+  - aluvia-brave-search
+  - arxiv-watcher
+  - rss-skill
 
 memory:
   private_notes: "memory/researcher-notes.md"

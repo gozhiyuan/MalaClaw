@@ -46,7 +46,7 @@ capabilities:
     gateway: false
 
 skills:
-  - github
+  - agentic-devops
 
 memory:
   private_notes: "memory/devops-engineer-notes.md"

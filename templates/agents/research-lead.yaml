@@ -45,7 +45,8 @@ capabilities:
     gateway: false
 
 skills:
-  - last30days
+  - aluvia-brave-search
+  - social-intelligence
 
 memory:
   private_notes: "memory/research-lead-notes.md"

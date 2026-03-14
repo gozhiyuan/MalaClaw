@@ -37,7 +37,10 @@ capabilities:
     cron: false
     gateway: false
 
-skills: []
+skills:
+  - x-research-but-cheaper
+  - social-intelligence
+  - publora-telegram
 
 memory:
   private_notes: "memory/social-media-manager-notes.md"

@@ -38,7 +38,8 @@ capabilities:
     cron: false
     gateway: false
 
-skills: []
+skills:
+  - danube
 
 memory:
   private_notes: "memory/report-writer-notes.md"

@@ -45,7 +45,7 @@ capabilities:
     gateway: false
 
 skills:
-  - last30days
+  - aluvia-brave-search
 
 memory:
   private_notes: "memory/writer-notes.md"

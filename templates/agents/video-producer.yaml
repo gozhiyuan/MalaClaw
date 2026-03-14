@@ -36,7 +36,9 @@ capabilities:
     cron: false
     gateway: false
 
-skills: []
+skills:
+  - youtube-pro
+  - fal-ai
 
 memory:
   private_notes: "memory/video-producer-notes.md"

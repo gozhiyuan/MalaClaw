@@ -38,7 +38,8 @@ capabilities:
     gateway: false
 
 skills:
-  - last30days
+  - aluvia-brave-search
+  - x-research-but-cheaper
 
 memory:
   private_notes: "memory/seo-specialist-notes.md"

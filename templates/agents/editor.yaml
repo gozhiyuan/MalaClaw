@@ -45,7 +45,8 @@ capabilities:
     gateway: false
 
 skills:
-  - last30days
+  - fal-ai
+  - rss-skill
 
 memory:
   private_notes: "memory/editor-notes.md"

@@ -39,7 +39,8 @@ capabilities:
     gateway: false
 
 skills:
-  - last30days
+  - duckdb-en
+  - aluvia-brave-search
 
 memory:
   private_notes: "memory/analyst-notes.md"

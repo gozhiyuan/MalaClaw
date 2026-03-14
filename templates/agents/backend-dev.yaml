@@ -46,8 +46,7 @@ capabilities:
     gateway: false
 
 skills:
-  - github
-  - coding-agent
+  - duckdb-en
 
 memory:
   private_notes: "memory/backend-dev-notes.md"
