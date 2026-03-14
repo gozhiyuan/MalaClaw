@@ -33,6 +33,10 @@ It must also work safely when a repo is not yet managed by `openclaw-store`.
   openclaw-store scaffolds the project structure, agents, and skill targeting.
 - Single-agent mode: use `default-managed` starter — one generalist agent, no team overhead.
   Do not build a full team unless the user explicitly wants multi-agent coordination.
+- Available teams: dev-company, content-factory, research-lab, autonomous-startup, personal-assistant, automation-ops, customer-service, finance-ops, data-ops
+- Skills are per agent, not per team. Each agent YAML declares its own skills list.
+- Required skills block install. Optional skills never block install.
+- For family-calendar demo: ask the user which calendar system they use before targeting skills.
 
 ## Workflow
 
@@ -49,6 +53,7 @@ Run the smallest commands that answer the question:
 - `openclaw-store team show <team-id>`
 - `openclaw-store agent show <agent-id>`
 - `openclaw-store skill show <skill-id>`
+- `openclaw-store skill sync`
 
 If the user asks which agent to open in OpenClaw, prefer the project entry-point agent from `project show`.
 
@@ -81,6 +86,7 @@ If no starter is close enough:
 When a project needs a skill:
 
 1. Confirm the skill exists as a template
+   or is already available in OpenClaw via `openclaw-store skill list` / `skill sync`
 2. Edit `openclaw-store.yaml`
 3. Add the skill under `skills:`
 4. Target it to the correct agents or teams with `targets.agents` or `targets.teams`
@@ -94,7 +100,8 @@ If the skill is an external OpenClaw skill rather than a repo-bundled one:
 1. tell the user which skill or API integration is missing
 2. guide them to install or configure it in OpenClaw first
 3. verify it exists locally
-4. then re-run `openclaw-store install` so it is attached to the targeted agents
+4. run `openclaw-store skill sync` if you want to refresh the local availability inventory
+5. then re-run `openclaw-store install` so it is attached to the targeted agents
 
 Example:
 
@@ -123,7 +130,7 @@ If install reports a missing skill source:
 
 - check `openclaw-store skill show <skill-id>`
 - inspect the skill's source and install hints
-- use the demo card's `external_requirements` and `setup_guidance` to explain the missing dependency in project terms
+- use the demo card's `installable_skills`, `required_apis`, `required_capabilities`, and `setup_guidance` to explain the missing dependency in project terms
 - do not claim the skill is installed until `skill check` or install output confirms it
 
 If install reports inactive status:
@@ -161,6 +168,67 @@ See MEMORY.md in each agent workspace for the exact paths and access patterns.
 
 Note: Claude Code remains unsupported as a runtime target until a real adapter is built
 (`src/lib/adapters/claude-code.ts` is still a stub). Use OpenClaw as the runtime.
+
+## Project Initialization Flow
+
+When a user asks to spin up a project or demo, follow this sequence exactly:
+
+### Step 1: Suggest a starter
+Run `openclaw-store starter suggest "<user idea>"`.
+Present the closest match: name, team, agents, required skills, optional skills.
+
+### Step 2: Confirm and initialize
+Once the user confirms the starter and target directory:
+- If the demo is `family-calendar-household-assistant`: ask "Do you use Google Calendar or Apple Calendar?" and note the answer — you will target only the user's chosen calendar skill during install.
+- Run `openclaw-store starter init <starter-id> <dir>`
+  This creates: `openclaw-store.yaml`, `STARTER.md`, `DEMO_PROJECT.md`
+
+### Step 3: Detect skill gaps
+Run `openclaw-store skill sync`
+- This checks what is already installed in OpenClaw
+- Compare against each agent's declared skills
+- If skill sync fails (OpenClaw offline or unreachable): warn the user and ask them to confirm each required skill manually before you proceed
+
+### Step 4: Guide missing required skills (blocking)
+For each required skill not yet installed:
+1. State which skill is missing and which agent(s) need it
+2. Provide the install command: `clawhub install <skill-slug>`
+3. Provide the env var to set and where to get the key (read from the demo card's Skills Setup section)
+4. Wait for the user to confirm they have installed it
+5. Re-run `openclaw-store skill sync` to confirm presence
+6. Repeat until all required skills are present
+
+Required skills BLOCK `openclaw-store install`. Do not proceed until all are confirmed.
+
+### Step 5: Mention optional skills (non-blocking)
+After all required skills are confirmed, mention any optional skills from `installable_skills`:
+"These optional skills will enhance the project but are not required:
+• `<skill-id>` — <what it adds> (install with: clawhub install <skill-id>)"
+Do not wait for optional skills. Proceed immediately.
+
+### Step 6: Install
+Run from the project directory:
+```
+cd <dir>
+openclaw-store install
+```
+
+### Step 7: Verify
+Run `openclaw-store doctor`
+All agents and required skills must be healthy.
+
+### Step 8: Hand off to user
+Tell the user:
+- The exact agent ID to open in OpenClaw (the entry-point agent)
+- A concrete first task to give that agent, based on the demo's bootstrap_prompt
+
+Example handoff:
+"Your Habit Tracker is ready. Open this agent in OpenClaw:
+→ `store__<project-id>__personal-assistant__personal-assistant-lead`
+
+Give it a task like:
+'Set up daily habit tracking for: morning exercise, reading 30 mins, and no phone after 9pm.
+Send me a daily accountability check-in at 8pm via Telegram.'"
 
 ## Reference
 

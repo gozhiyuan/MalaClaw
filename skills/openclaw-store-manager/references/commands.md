@@ -13,6 +13,7 @@ openclaw-store team show <team-id>
 openclaw-store agent show <agent-id>
 openclaw-store skill show <skill-id>
 openclaw-store skill check
+openclaw-store skill sync
 openclaw-store diff
 openclaw-store doctor
 ```
@@ -78,4 +79,14 @@ skills:
         - content-factory
 ```
 
-When an external skill is missing, guide the user to install or configure it in OpenClaw first, then re-run `openclaw-store install` so the targeted agents receive it.
+When an external skill is missing, guide the user to install or configure it in OpenClaw first, optionally run `openclaw-store skill sync` to refresh availability, then re-run `openclaw-store install` so the targeted agents receive it.
+
+## New Teams (v1.1.0)
+
+| Pack | Entry agent | Use for |
+|---|---|---|
+| `personal-assistant` | `personal-assistant-lead` | Habit tracking, health, calendar, meetings, CRM, second brain |
+| `automation-ops` | `automation-lead` | Email, workflows, notifications, n8n, phone calls, Todoist |
+| `customer-service` | `service-lead` | Multi-channel customer support and ticket management |
+| `finance-ops` | `finance-lead` | Earnings tracking, Polymarket, market research |
+| `data-ops` | `data-lead` | Dashboards, RAG/knowledge base, semantic search |
