@@ -25,7 +25,7 @@ graph:
     relationship: delegates_to
 
 shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/research-lab/shared/memory/"
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/<team-id>/shared/memory/"
   files:
     - path: findings-log.md
       access: append-only

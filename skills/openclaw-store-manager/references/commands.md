@@ -1,5 +1,19 @@
 # Commands
 
+## Bootstrap `openclaw-store`
+
+If the CLI is not available yet:
+
+```bash
+git clone <repo-url>
+cd openclaw-store
+npm install
+npm run build
+npm link
+openclaw-store --help
+openclaw-store install
+```
+
 ## Read state
 
 ```bash
@@ -31,6 +45,15 @@ Default lightweight managed entry point:
 ```bash
 openclaw-store starter show default-managed
 openclaw-store starter init default-managed ./my-project
+```
+
+Promotion flow from an existing ad hoc workflow:
+
+```bash
+openclaw-store skill sync
+openclaw-store starter suggest "<current workflow>"
+openclaw-store starter init default-managed ./my-project
+openclaw-store install
 ```
 
 Demo project metadata:
@@ -80,13 +103,3 @@ skills:
 ```
 
 When an external skill is missing, guide the user to install or configure it in OpenClaw first, optionally run `openclaw-store skill sync` to refresh availability, then re-run `openclaw-store install` so the targeted agents receive it.
-
-## New Teams (v1.1.0)
-
-| Pack | Entry agent | Use for |
-|---|---|---|
-| `personal-assistant` | `personal-assistant-lead` | Habit tracking, health, calendar, meetings, CRM, second brain |
-| `automation-ops` | `automation-lead` | Email, workflows, notifications, n8n, phone calls, Todoist |
-| `customer-service` | `service-lead` | Multi-channel customer support and ticket management |
-| `finance-ops` | `finance-lead` | Earnings tracking, Polymarket, market research |
-| `data-ops` | `data-lead` | Dashboards, RAG/knowledge base, semantic search |

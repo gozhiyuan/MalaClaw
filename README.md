@@ -1,693 +1,426 @@
 # openclaw-store
 
-**Ready-made multi-agent teams for OpenClaw.** Install a full dev company, content studio, or research lab in one command — then customize every agent, team, and skill to match your workflow.
+`openclaw-store` is a project layer on top of OpenClaw.
 
----
+It gives OpenClaw a catalog of demo projects, starter manifests, reusable agent teams, and skill-targeting rules so a user can go from:
 
-## Why this exists
+- "I have an idea"
+- or "I already hacked together some skills and prompts"
 
-OpenClaw is powerful but has a steep setup curve: configuring agents, wiring up shared memory, preventing race conditions, and setting up team coordination all require deep ecosystem knowledge.
+to a repeatable managed project with the right entry-point agent, team structure, skills, and setup guidance.
 
-`openclaw-store` closes that gap with **starter packs** — pre-built, production-ready multi-agent teams you install like npm packages.
-It also includes starter demo projects generated from `awesome-openclaw-usecases`, so OpenClaw can begin from a working example and then adapt it into a managed project.
-Those demos are also indexed in `demo-projects/index.yaml` with richer cards in `demo-projects/cards/`.
+Pain point: the bottleneck in OpenClaw adoption is usually not raw skill count. It is helping users discover repeatable ways OpenClaw can improve a real project, then turning those workflows into something structured and reusable.
 
----
+## Get Started In OpenClaw
 
-## Quick Start
+The recommended entry point is not "edit YAML first".
 
-Need the end-to-end usage flow for this repo? See [docs/repo-workflow.md](./docs/repo-workflow.md).
+The recommended entry point is:
 
-### 1. Install the CLI
+### Option 1: Let OpenClaw bootstrap from `SKILL.md` (recommended)
+
+If you are already using OpenClaw, you should be able to hand it the manager skill directly.
+
+Send OpenClaw something like:
+
+```text
+Please follow this SKILL.md to install openclaw-store-manager for me and bootstrap openclaw-store:
+
+- local file: skills/openclaw-store-manager/SKILL.md
+- or repo URL: <repo-url>/blob/main/skills/openclaw-store-manager/SKILL.md
+```
+
+The intended behavior is:
+
+- OpenClaw reads the manager skill instructions
+- installs or copies `openclaw-store-manager` into its workspace
+- uses that skill to inspect demos, starters, packs, and skill requirements
+- guides the user through any missing API auth or install steps
+- promotes the repo into a managed project only when needed
+
+### Option 2: Use the CLI bootstrap
+
+If the CLI is already available on your machine, run:
 
 ```bash
-# In this repo:
+openclaw-store install
+```
+
+If there is no `openclaw-store.yaml` in the current directory, `openclaw-store` does a zero-config bootstrap instead of failing:
+
+- it installs the bundled `openclaw-store-manager` skill into your main OpenClaw workspace
+- it updates the main OpenClaw guidance files
+- it leaves your repo in default OpenClaw mode until you choose to promote it
+
+After that, start from a normal OpenClaw conversation.
+
+### What To Ask In OpenClaw
+
+Examples:
+
+```text
+Show me demo projects for podcast production.
+I want to build a research workflow for earnings calls.
+Help me turn this repo into a managed project.
+Add a GitHub skill to this project.
+Should this stay single-agent or become a team?
+```
+
+## What `openclaw-store` Does Through OpenClaw
+
+Once `openclaw-store-manager` is installed, OpenClaw can guide these flows.
+
+### 1. Demo Project Flow
+
+This is the catalog-driven path.
+
+Typical sequence:
+
+1. The user describes an idea.
+2. `openclaw-store-manager` runs `starter suggest` and inspects the closest starter.
+3. It reads the demo card metadata:
+   - `entry_team`
+   - `project_skills`
+   - `installable_skills`
+   - `required_apis`
+   - `required_capabilities`
+4. It asks the user for any missing auth or API setup.
+5. It initializes the starter with `openclaw-store starter init`.
+6. It customizes the generated `openclaw-store.yaml` if needed.
+7. It runs `openclaw-store skill sync`, `openclaw-store install`, and `openclaw-store doctor`.
+8. It tells the user which project entry-point agent to open in OpenClaw.
+
+In practice, that means OpenClaw can help the user:
+
+- choose a demo project
+- create the managed project files
+- install or target the right skills
+- ask for missing API auth
+- hand off to the correct agent team
+
+### 2. Promote To Project Flow
+
+This is the "I already have a workflow" path.
+
+The intended promotion flow is:
+
+1. OpenClaw inspects whether the repo is:
+   - default OpenClaw workflow
+   - default Claude Code workflow
+   - already `openclaw-store` managed
+2. It looks at what the user is already doing:
+   - recurring prompts
+   - installed skills
+   - external APIs
+   - whether work needs one agent or a coordinated team
+3. It recommends one of three outcomes:
+   - stay in default workflow
+   - promote to `default-managed`
+   - promote to a fuller starter or custom managed project
+4. It generates or edits `openclaw-store.yaml`.
+5. It targets the needed skills to the right agents or teams.
+6. It installs and verifies the project.
+
+This is how a user can start with ad hoc OpenClaw skills and later turn them into a structured project without rebuilding from scratch.
+
+### 3. Customize Managed Project Flow
+
+After a project exists, OpenClaw can use `openclaw-store-manager` to:
+
+- add or retarget skills
+- swap packs or change the entry team
+- attach native OpenClaw agents into a managed project
+- install newly discovered OpenClaw skills into managed agent workspaces
+- re-run `diff`, `install`, `doctor`, and `skill check`
+
+## How Skills Work Across OpenClaw And `openclaw-store`
+
+This is the key mental model:
+
+- OpenClaw is the runtime.
+- `openclaw-store` is the project and installation layer.
+
+That means skills often exist in two places for two different reasons:
+
+1. **OpenClaw-owned skill installation**
+   - a skill is installed in OpenClaw's workspace/global skill locations
+   - this is how the skill becomes available to OpenClaw itself
+
+2. **Project-targeted skill materialization**
+   - `openclaw-store skill sync` discovers available OpenClaw skills
+   - `openclaw-store install` then symlinks or copies those skills into the managed agent workspaces that need them
+   - it also updates OpenClaw agent allowlists when an agent has an explicit `skills[]` filter
+
+So yes: a user can install their own skills directly in OpenClaw without going through `openclaw-store`, and later `openclaw-store` can discover those skills and attach them to a managed project.
+
+The bundled `openclaw-store-manager` skill works the same way conceptually:
+
+- zero-config bootstrap installs it into the main OpenClaw workspace
+- starter or manifest targeting can also place it into managed project workspaces when desired
+
+## Authoring Layer vs Runtime Layer
+
+`openclaw-store` uses YAML as its authoring and orchestration format.
+
+OpenClaw does not need to read the team or agent YAML files directly. Instead:
+
+1. `openclaw-store` reads the YAML definitions for agents, teams, packs, starters, and skills
+2. it renders the runtime Markdown files OpenClaw actually uses
+3. it provisions those files into the agent workspaces that OpenClaw runs
+
+In other words:
+
+- YAML is the `openclaw-store` control plane
+- rendered files like `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, and `MEMORY.md` are the OpenClaw runtime contract
+
+This is why the YAML structure is a good fit here: it is easy to validate, diff, generate from, and customize, while still compiling down to the exact OpenClaw workspace shape.
+
+## Bundled Catalog In This Repo
+
+This repo currently ships:
+
+- 9 reusable packs:
+  - `automation-ops`
+  - `dev-company`
+  - `personal-assistant`
+  - `content-factory`
+  - `customer-service`
+  - `finance-ops`
+  - `data-ops`
+  - `research-lab`
+  - `autonomous-startup`
+- 37 starter demo projects in [`demo-projects/index.yaml`](./demo-projects/index.yaml)
+- 28 bundled skill templates in [`templates/skills/`](./templates/skills)
+- 1 bundled manager skill implementation in [`skills/openclaw-store-manager/`](./skills/openclaw-store-manager)
+
+Use these commands to explore the catalog:
+
+```bash
+openclaw-store starter list
+openclaw-store starter suggest "podcast workflow"
+openclaw-store starter show podcast-production-pipeline
+openclaw-store team show dev-company
+openclaw-store skill show openclaw-store-manager
+```
+
+## Optional Manual Installation
+
+If you want to install the CLI locally from this repo:
+
+```bash
+git clone <this-repo>
+cd openclaw-store
 npm install
 npm run build
-npm link   # makes `openclaw-store` available globally
+npm link
 ```
 
-### 2. Bootstrap OpenClaw
+Then bootstrap the OpenClaw entry path:
 
 ```bash
 openclaw-store install
 ```
 
-If there is no `openclaw-store.yaml`, this is now a zero-config bootstrap path. It installs `openclaw-store-manager` into the main OpenClaw workspace so the user can start from inside OpenClaw first.
-
-```
-openclaw-store: no manifest found.
-Installing openclaw-store-manager skill into OpenClaw main agent workspace...
-
-✓ Skill installed: openclaw-store-manager
-
-The skill is now available in OpenClaw. Ask your agent to:
-  1. Run: openclaw-store starter list
-  2. Pick a starter and run: openclaw-store starter init <id> ./my-project
-  3. Then: openclaw-store install
-```
-
-### 3. Start a managed project
-
-Use a starter when possible. `starter init` creates the target project folder for you if it does not exist yet.
+If you want to initialize a managed starter directly from the CLI:
 
 ```bash
-openclaw-store starter suggest "podcast workflow"
-openclaw-store starter init podcast-production-pipeline ./my-project
+openclaw-store starter suggest "habit tracker"
+openclaw-store starter init habit-tracker-accountability-coach ./my-project
 cd ./my-project
+openclaw-store install
+```
+
+## Repository Structure
+
+High-level layout:
+
+```text
+openclaw-store/
+├── packs/                 # reusable pack definitions
+├── templates/
+│   ├── agents/            # agent YAML templates
+│   ├── teams/             # team graphs + shared memory rules
+│   └── skills/            # bundled skill metadata
+├── starters/              # starter definitions for demo/project scaffolding
+├── demo-projects/
+│   ├── index.yaml         # generated demo catalog
+│   └── cards/             # richer setup/execution cards per demo
+├── skills/
+│   └── openclaw-store-manager/
+├── src/                   # CLI + install/runtime logic
+└── docs/
+```
+
+Most important files:
+
+- `openclaw-store.yaml`
+  - project manifest, committed to the repo
+- `openclaw-store.lock`
+  - resolved install state, committed to the repo
+- `demo-projects/index.yaml`
+  - generated catalog for OpenClaw-guided demo selection
+- `skills/openclaw-store-manager/SKILL.md`
+  - the bridge skill that lets OpenClaw manage `openclaw-store` projects conversationally
+
+## Technical Model
+
+### Packs
+
+Packs are reusable bundles of teams plus default skills.
+
+Examples:
+
+- [`packs/dev-company.yaml`](./packs/dev-company.yaml)
+- [`packs/content-factory.yaml`](./packs/content-factory.yaml)
+- [`packs/research-lab.yaml`](./packs/research-lab.yaml)
+- [`packs/autonomous-startup.yaml`](./packs/autonomous-startup.yaml)
+
+### Teams
+
+Teams define:
+
+- members
+- lead/specialist/reviewer roles
+- delegation graph
+- shared memory files
+
+Examples live in:
+
+- [`templates/teams/`](./templates/teams)
+
+### Agents
+
+Agents define:
+
+- persona
+- tone and boundaries
+- primary/fallback model
+- file/system/coordination capabilities
+- the skills each agent expects
+
+Examples live in:
+
+- [`templates/agents/`](./templates/agents)
+
+### Skills
+
+Bundled skill templates define:
+
+- source type
+- trust tier
+- required binaries
+- required env vars
+- install hints
+
+Examples live in:
+
+- [`templates/skills/`](./templates/skills)
+
+### Starters
+
+Starter definitions are the project scaffolding layer.
+
+Each starter includes:
+
+- source use case
+- preferred `entry_team`
+- `packs`
+- `project_skills`
+- `installable_skills`
+- `required_apis`
+- `required_capabilities`
+- a bootstrap prompt
+
+These files live in:
+
+- [`starters/`](./starters)
+
+### Demo Cards
+
+Demo cards are richer, generated project guides used by the manager skill.
+
+They live in:
+
+- [`demo-projects/cards/`](./demo-projects/cards)
+
+### Project State
+
+Main state files:
+
+| File | Purpose |
+|---|---|
+| `openclaw-store.yaml` | desired project topology |
+| `openclaw-store.lock` | resolved install state |
+| `~/.openclaw-store/runtime.json` | installed project registry |
+| `~/.openclaw-store/workspaces/store/...` | managed agent workspaces |
+| `~/.openclaw/openclaw.json` | OpenClaw runtime config patched during install |
+
+## Memory Boundary
+
+`openclaw-store` does not replace OpenClaw's native memory model.
+
+There are two distinct layers:
+
+1. **OpenClaw native memory**
+   - lives inside each agent workspace
+   - includes `MEMORY.md` and `memory/*.md`
+   - is what OpenClaw's memory tools index for that agent
+
+2. **`openclaw-store` shared team memory**
+   - lives under `~/.openclaw-store/workspaces/store/<project>/<team>/shared/memory/`
+   - is used for coordination files like `kanban.md`, `tasks-log.md`, and `blockers.md`
+   - is governed by explicit ownership rules from team YAML
+
+The shared team memory layer is orchestration state, not a replacement for OpenClaw memory. Agents should continue to use OpenClaw's native memory layer for their own workspace memory, while `openclaw-store` manages the extra team coordination files around it.
+
+## Useful Commands
+
+```bash
+# bootstrap
+openclaw-store install
 openclaw-store install --dry-run
-openclaw-store install
-```
-
-If you want to build a managed project from scratch instead, use:
-
-```bash
-mkdir my-project && cd my-project
-openclaw-store init
-```
-
-The interactive wizard asks which packs and skills you want:
-
-```
-openclaw-store init
-
-◆ Select starter packs to install:
-│  ◼ Dev Company — Full software development team: PM, Tech Lead, Backend...
-│  ◻ Content Factory — Content production team: Editor, Writer, SEO...
-│  ◻ Research Lab — Research team: Research Lead, Data Analyst...
-│  ◻ Autonomous Startup — Single-agent CEO generalist...
-└
-
-◆ Add optional skills (can be added later):
-│  ◼ GitHub  [curated]
-│  ◻ Last 30 Days Research  [requires: OPENAI_API_KEY]
-└
-
-Created openclaw-store.yaml with 1 pack(s) and 1 skill(s).
-Run: openclaw-store install --dry-run   to preview
-Run: openclaw-store install             to install
-```
-
-### 4. Preview the install
-
-```bash
-openclaw-store install --dry-run
-```
-
-Shows every file that will be created and every config change before touching anything.
-
-### 5. Install
-
-```bash
-openclaw-store install
-```
-
-This:
-- Creates agent workspaces at `~/.openclaw-store/workspaces/store/<project>/<team>/<agent>/`
-- Writes bootstrap files per agent (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, USER.md, MEMORY.md)
-- Seeds shared memory files with ownership headers
-- Patches `~/.openclaw/openclaw.json` with the new agents
-- Registers the project in `~/.openclaw-store/runtime.json`
-- Updates your main agent's TOOLS.md and AGENTS.md with store guidance
-- Writes `openclaw-store.lock`
-
-### 6. Verify
-
-```bash
-openclaw-store doctor
-# ✓ openclaw-store.yaml found
-# ✓ openclaw.json found at ~/.openclaw/openclaw.json
-# ✓ Lockfile found: 1 pack(s), 1 skill(s)
-# ✓ Workspace OK: store__my-project__dev-company__pm
-# ✓ Workspace OK: store__my-project__dev-company__tech-lead
-# ...
-# ✓ All checks passed.
-```
-
----
-
-## Available Packs
-
-### Dev Company (`dev-company`)
-
-Full software development team. Entry point: **Project Manager**.
-
-```
-📋 Project Manager (lead, entry point)
-  🏗️ Tech Lead (lead)
-    ⚙️ Backend Developer (specialist)
-    🎨 Frontend Developer (specialist)
-    🧪 QA Engineer (reviewer)
-    🛡️ Security Engineer (reviewer)
-  🚀 DevOps Engineer (specialist)
-```
-
-**Shared memory:**
-| File | Access | Writer |
-|---|---|---|
-| `kanban.md` | single-writer | PM only |
-| `team-shared.md` | single-writer | PM only |
-| `tasks-log.md` | append-only | all |
-| `blockers.md` | append-only | all |
-
-**Invoke:** Open the `store__<project-id>__dev-company__pm` agent in OpenClaw and give it a task.
-
----
-
-### Content Factory (`content-factory`)
-
-Content production pipeline. Entry point: **Editor**.
-
-```
-✍️ Editor (lead, entry point)
-  📝 Content Writer (specialist)
-  🔍 SEO Specialist (specialist)
-  📱 Social Media Manager (specialist)
-  🎬 Video Producer (specialist)
-```
-
-**Shared memory:**
-| File | Access | Writer |
-|---|---|---|
-| `content-brief.md` | single-writer | Editor only |
-| `pipeline-log.md` | append-only | all |
-
----
-
-### Research Lab (`research-lab`)
-
-Rigorous research pipeline. Entry point: **Research Lead**.
-
-```
-🔬 Research Lead (lead, entry point)
-  📊 Data Analyst (specialist)
-  🧭 Researcher (specialist)
-  📑 Report Writer (specialist)
-```
-
-**Shared memory:**
-| File | Access | Writer |
-|---|---|---|
-| `research-brief.md` | single-writer | Lead only |
-| `findings-log.md` | append-only | all |
-
----
-
-### Autonomous Startup (`autonomous-startup`)
-
-Single CEO agent that spawns sub-agents as needed. Entry point: **CEO**.
-
-```
-🦅 CEO (lead, entry point)
-```
-
-Good for: open-ended tasks, solo agent with on-demand specialisation.
-
----
-
-## CLI Reference
-
-```bash
-# Setup
-openclaw-store init                          # Interactive wizard
-openclaw-store install [--dry-run] [--force] [--no-openclaw] # Install from openclaw-store.yaml
-openclaw-store install --pack dev-company    # One-shot install (no manifest needed)
-openclaw-store uninstall --pack dev-company  # Remove a pack
-openclaw-store uninstall --all               # Remove everything
-
-# Demo starters
-openclaw-store starter list                  # List starter demo projects
-openclaw-store starter suggest "<idea>"      # Find similar starters for a new idea
-openclaw-store starter show <id>             # Inspect one starter
-openclaw-store starter init <id> [dir]       # Initialize a project from a starter
-
-# Exploration
-openclaw-store list                          # List all packs, teams, agents, skills
-openclaw-store list --packs                  # Packs only
-openclaw-store list --agents                 # Agent templates only
-openclaw-store list --teams                  # Team templates only
-openclaw-store list --skills                 # Skills with activation status
-
-openclaw-store agent show <id>               # Agent details + capability matrix
-openclaw-store agent refresh <id>            # Re-render workspace from YAML template
-openclaw-store team show <id>                # Team graph + shared memory config
-
-openclaw-store skill show <id>               # Skill details + env var status
-openclaw-store skill check                   # Check which skills are active/inactive
-openclaw-store skill sync                    # Discover OpenClaw-installed skills and refresh availability
-
-openclaw-store project list                  # List installed projects from runtime.json
-openclaw-store project show <id>             # Show one installed project's entry points
-openclaw-store project status                # Installation overview
-openclaw-store project kanban <team-id>      # Show team kanban board
-openclaw-store project attach-agent <id>     # Attach an existing native OpenClaw agent to this project
-openclaw-store project detach-agent <id>     # Remove an attached native OpenClaw agent from this project
-
-# Preview & validate
-openclaw-store diff                          # Show what would change vs lockfile
-openclaw-store validate                      # Validate all templates against schema
-
-# CI / Claude Code mode
-openclaw-store install --no-openclaw         # Install without patching openclaw.json
-
-# Health
-openclaw-store doctor                        # Full health check
-openclaw-store doctor --fix                  # Attempt auto-remediation
-```
-
----
-
-## Project Layer
-
-`openclaw-store` is now project-scoped, not just team-scoped.
-
-- Each project has its own `openclaw-store.yaml` and `openclaw-store.lock`
-- Each install gets a `project.id`
-- Installed agent IDs are namespaced as `store__<project>__<team>__<agent>`
-- Installed workspaces live under `~/.openclaw-store/workspaces/store/<project>/<team>/<agent>/`
-- `~/.openclaw-store/runtime.json` is the global registry of installed projects
-
-Agent ownership is intentionally lightweight:
-
-- OpenClaw remains the source of truth for all runtime agents
-- `openclaw-store` directly manages only store-installed agents and teams
-- Existing native OpenClaw agents can be discovered and explicitly attached to a project
-- `install` remains the reconciliation point for store-managed agents and attached-agent skill placement
-
-Skill ownership follows the same rule:
-
-- OpenClaw remains the source of truth for the full runtime skill universe
-- `openclaw-store` directly manages a curated/project-aware subset
-- Native OpenClaw skills can be discovered with `openclaw-store skill sync`
-- Once available, they can be assigned by ID in `openclaw-store.yaml`
-- `install` remains the reconciliation point that places those skills into targeted agents
-
-The project manifest is the control point for choosing which teams and skills a project should run:
-
-```yaml
-version: 1
-project:
-  id: podcast-studio
-  name: "Podcast Studio"
-  entry_team: content-factory
-packs:
-  - id: content-factory
-  - id: research-lab
-skills:
-  - id: github
-  - id: last30days
-    env:
-      OPENAI_API_KEY: required
-  - id: openclaw-store-manager
-    targets:
-      agents:
-        - tech-lead
-```
-
-That means:
-
-- OpenClaw agents for this project are installed under the `podcast-studio` namespace
-- The project gets both the `content-factory` and `research-lab` teams
-- `content-factory` is the preferred team to open first
-- Any agent template that declares `github` or `last30days` receives those skills during install
-- `openclaw-store-manager` is additionally targeted to `tech-lead` for this project
-
-Skill placement rules:
-
-- A project skill is installed into agents that declare it in their agent YAML
-- You can also target a skill at install time with `targets.agents` or `targets.teams`
-- OpenClaw does not auto-install missing skills on its own
-- If you change skill placement, re-run `openclaw-store install`
-
-To add another project later, either initialize a starter directly into a new folder with `openclaw-store starter init <id> ./my-project`, or create/enter that project's directory and run `openclaw-store init` for the scratch path. Then use `openclaw-store project list` and `openclaw-store project show <id>` to discover installed projects and their entry-point agents.
-
-Native OpenClaw agents are not mirrored into `openclaw-store` as first-class templates. Instead, `openclaw-store` discovers them from `openclaw.json`, shows them as available, and lets you explicitly attach them to a managed project when needed.
-
-## Starter Demo Projects
-
-The repo includes 36 starter demo projects generated from `awesome-openclaw-usecases`, plus a built-in `default-managed` starter for the lightest managed setup.
-
-Each starter contains:
-
-- a source use case
-- recommended built-in packs
-- a preferred entry team
-- the `openclaw-store-manager` project skill
-- recommended installable OpenClaw skills
-- required APIs or external services
-- required runtime capabilities or tools
-- a human-readable requirement summary
-- a bootstrap prompt for the demo
-- a metadata entry in `demo-projects/index.yaml`
-- a richer card in `demo-projects/cards/<starter-id>.md`
-
-Typical flow:
-
-```bash
-openclaw-store install
-openclaw-store starter suggest "build a podcast workflow"
-openclaw-store starter show podcast-production-pipeline
-openclaw-store starter init podcast-production-pipeline ./my-podcast-project
-cd ./my-podcast-project
-openclaw-store install --dry-run
-openclaw-store install
-```
-
-Minimal managed fallback:
-
-```bash
-openclaw-store starter show default-managed
-openclaw-store starter init default-managed ./my-project
-```
-
-The generated project includes `openclaw-store.yaml`, `STARTER.md`, and `DEMO_PROJECT.md`.
-
-The intended conversational path is the same: `openclaw-store-manager` can suggest a starter, inspect its demo card, guide the user through any required skills or API setup in OpenClaw, initialize it, then modify the generated `openclaw-store.yaml` to fit the user's real project.
-
----
-
-## Default Workflow Support
-
-This repo is intended to coexist with default OpenClaw and default Claude Code workflows.
-
-If a repo does not have `openclaw-store.yaml`, `openclaw-store` treats it as an unmanaged repo instead of assuming it is broken:
-
-- `CLAUDE.md` or `.claude/` present -> default Claude Code workflow
-- no manifest, but OpenClaw is installed -> default OpenClaw workflow
-- manifest present -> `openclaw-store` managed workflow
-
-That means you can install the `openclaw-store-manager` skill into OpenClaw, let it inspect repos, and only opt into full project/team/skill management when the user wants it.
-
-In practice, the easiest entry path is:
-
-```bash
-openclaw-store install
-```
-
-If no manifest exists, that bootstraps the manager skill into OpenClaw instead of failing.
-
-For managed installs in Claude Code or CI-style environments, use:
-
-```bash
-openclaw-store install --no-openclaw
-```
-
-That keeps project/team/skill management while skipping `openclaw.json` patching.
-
----
-
-## Customisation Guide
-
-### Override an agent's model
-
-In `openclaw-store.yaml`:
-
-```yaml
-version: 1
-project:
-  id: my-project
-  name: "My Project"
-packs:
-  - id: dev-company
-    overrides:
-      pm.model.primary: "claude-sonnet-4-5"      # cheaper PM
-      tech-lead.model.primary: "claude-opus-4-5"  # keep lead on opus
-```
-
-### Edit an agent's persona
-
-Copy the agent YAML to a `local-agents/` directory and edit it:
-
-```bash
-cp templates/agents/pm.yaml local-agents/pm.yaml
-# edit local-agents/pm.yaml
-```
-
-Then point the loader at your local templates:
-
-```bash
-OPENCLAW_STORE_TEMPLATES=./local-agents openclaw-store install
-```
-
-Or set it permanently in your shell profile. The loader checks `OPENCLAW_STORE_TEMPLATES` first for each agent/team/skill, falling back to the bundled templates.
-
-### Add a skill
-
-1. Add to `openclaw-store.yaml`:
-```yaml
-skills:
-  - id: last30days
-    env:
-      OPENAI_API_KEY: required
-    targets:
-      teams:
-        - research-lab
-```
-
-2. Set the env var:
-```bash
-export OPENAI_API_KEY=sk-...
-```
-
-3. Re-install:
-```bash
-openclaw-store install
-```
-
-Skills with missing required env vars are installed as **inactive** and reported by `openclaw-store doctor`.
-Skills are not attached to every agent automatically. They are installed where the agent template or the project `targets` rules place them.
-
-### Create a custom agent
-
-Create `templates/agents/my-agent.yaml`:
-
-```yaml
-id: my-agent
-version: 1
-name: "My Custom Agent"
-
-identity:
-  emoji: "🎯"
-  vibe: "Short description of what this agent does"
-
-soul:
-  persona: |
-    You are {{agent.name}} on the {{team.name}} team.
-    [Your persona here...]
-  tone: "How this agent communicates"
-  boundaries:
-    - "What this agent never does"
-
-model:
-  primary: "claude-sonnet-4-5"
-
-capabilities:
-  coordination:
-    sessions_spawn: false   # true for leads only
-    sessions_send: false    # always false
-  file_access:
-    write: true
-    edit: true
-    apply_patch: true
-  system:
-    exec: true
-    cron: false
-    gateway: false
-
-team_role:
-  role: specialist  # lead | specialist | reviewer
-```
-
-Then reference it in a team YAML.
-
-### Create a custom team
-
-Create `templates/teams/my-team.yaml`:
-
-```yaml
-id: my-team
-name: "My Team"
-version: 1
-
-members:
-  - agent: my-lead-agent
-    role: lead
-    entry_point: true
-  - agent: my-specialist
-    role: specialist
-
-graph:
-  - from: my-lead-agent
-    to: my-specialist
-    relationship: delegates_to
-
-shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/<project-id>/my-team/shared/memory/"
-  files:
-    - path: tasks-log.md
-      access: append-only
-      writer: "*"
-    - path: brief.md
-      access: single-writer
-      writer: my-lead-agent
-```
-
-Then create a pack YAML in `packs/my-team.yaml`:
-
-```yaml
-id: my-team
-version: "1.0.0"
-name: "My Team"
-description: "What this team does"
-teams:
-  - my-team
-```
-
-Install it:
-```bash
-openclaw-store install --pack my-team
-```
-
-### Add a custom skill
-
-Create `templates/skills/my-skill.yaml`:
-
-```yaml
-id: my-skill
-version: 1
-name: "My Skill"
-description: "What it does"
-
-source:
-  type: local              # local | clawhub | openclaw-bundled
-  url: "path/to/skill"
-
-trust_tier: local          # curated | community | local
-
-requires:
-  env:
-    - key: MY_API_KEY
-      description: "API key for my service"
-      required: true
-
-disabled_until_configured: true
-```
-
-To place a skill on specific agents without editing every bundled agent template, target it from the project manifest:
-
-```yaml
-skills:
-  - id: my-skill
-    targets:
-      agents:
-        - pm
-        - tech-lead
-```
-
----
-
-## State Files
-
-| File | Location | Committed? | Purpose |
-|---|---|---|---|
-| `openclaw-store.yaml` | project root | ✓ yes | Project ID plus which packs/skills should be installed |
-| `openclaw-store.lock` | project root | ✓ yes | Resolved project, team, agent, and skill installation state |
-| `~/.openclaw-store/runtime.json` | home | ✗ no | Global registry of installed projects and entry points |
-| `~/.openclaw-store/` | home | ✗ no | Agent workspaces + shared memory + cache |
-| `~/.openclaw/openclaw.json` | home | ✗ no | Patched by installer (agent list, allowlist) |
-
-`openclaw-store.yaml` is created by `openclaw-store init`.
-
-Example:
-
-```yaml
-version: 1
-project:
-  id: my-project
-  name: "My Project"
-packs:
-  - id: dev-company
-    overrides:
-      pm.model.primary: "claude-sonnet-4-5"
-skills:
-  - id: github
-  - id: last30days
-    env:
-      OPENAI_API_KEY: required
-```
-
-`openclaw-store.lock` is written by `openclaw-store install` when installing from the manifest. It is not written for `openclaw-store install --pack <id>` or `--dry-run`.
-
-Example:
-
-```yaml
-version: 1
-project:
-  id: my-project
-  name: "My Project"
-packs:
-  - type: pack
-    id: my-project__dev-company__dev-company
-    project_id: my-project
-    source_id: dev-company
-    team_id: dev-company
-    version: 1.0.0
-    agents:
-      - id: store__my-project__dev-company__pm
-        workspace: /Users/you/.openclaw-store/workspaces/store/my-project/dev-company/pm
-        agent_dir: /Users/you/.openclaw/agents/store__my-project__dev-company__pm
-      - id: store__my-project__dev-company__tech-lead
-        workspace: /Users/you/.openclaw-store/workspaces/store/my-project/dev-company/tech-lead
-        agent_dir: /Users/you/.openclaw/agents/store__my-project__dev-company__tech-lead
-skills:
-  - type: skill
-    id: github
-    version: "1"
-    status: active
-  - type: skill
-    id: last30days
-    version: "1"
-    status: inactive
-    missing_env:
-      - OPENAI_API_KEY
-```
-
-Typical lifecycle:
-
-```bash
-openclaw-store init     # creates openclaw-store.yaml
-openclaw-store install  # reads yaml, installs teams, writes openclaw-store.lock
+openclaw-store install --force
+
+# starter catalog
+openclaw-store starter list
+openclaw-store starter suggest "<idea>"
+openclaw-store starter show <id>
+openclaw-store starter init <id> <dir>
+
+# projects
 openclaw-store project list
-openclaw-store project show my-project
+openclaw-store project show <id>
+openclaw-store project status
+
+# teams / agents / skills
+openclaw-store team show <id>
+openclaw-store agent show <id>
+openclaw-store skill show <id>
+openclaw-store skill sync
+openclaw-store skill check
+
+# health
+openclaw-store diff
+openclaw-store validate
+openclaw-store doctor
 ```
 
----
+## More Detail
 
-## Development & Testing
+For the full architecture and install/runtime model:
 
-```bash
-npm test                    # Run all tests (vitest)
-npm run test:watch          # Watch mode
-npm run test:coverage       # With coverage report
-npm run build               # TypeScript compile
-openclaw-store validate     # Validate all bundled templates
-```
+- [docs/how-it-works.md](./docs/how-it-works.md)
+- [docs/repo-workflow.md](./docs/repo-workflow.md)
 
----
+## Reference Work
 
-## Troubleshooting
+This repo builds on and is inspired by the surrounding OpenClaw ecosystem.
 
-**`openclaw.json not found`**
-Either install OpenClaw first, or if you're running in CI/Claude Code without OpenClaw:
-```bash
-openclaw-store install --no-openclaw
-```
+Thanks in particular to:
 
-**`[INACTIVE] last30days — missing: OPENAI_API_KEY`**
-Set the env var and re-run `openclaw-store install`. Skills degrade gracefully when optional vars are missing.
+- [OpenClaw](https://github.com/openclaw/openclaw)
+- [antfarm](https://github.com/snarktank/antfarm)
+- [awesome-openclaw-usecases](https://github.com/hesamsheikh/awesome-openclaw-usecases)
+- [awesome-openclaw-skills](https://github.com/VoltAgent/awesome-openclaw-skills)
 
-**Agent workspace missing after reinstall**
-Run `openclaw-store install --force` to overwrite existing workspace files.
-
-**`openclaw-store doctor` shows errors**
-Follow the `→` suggestions printed next to each error. Most are fixed with `openclaw-store install --force`.
+Those projects provide the runtime foundation, installer and guidance patterns, use-case catalog, and skill discovery surface that make this store model useful.

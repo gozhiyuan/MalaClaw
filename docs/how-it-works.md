@@ -6,7 +6,21 @@ This document explains the technical architecture: data flow, file formats, the 
 
 ## Architecture Overview
 
-## What's New in v1.0.0
+## Current Capabilities
+
+### Teams, Skills, and Interactive Install
+
+| Feature | Description |
+|---|---|
+| 5 new teams | `personal-assistant`, `automation-ops`, `customer-service`, `finance-ops`, `data-ops` — 20 new agent templates |
+| 25 new skill templates | Communication, calendar, health, research, data, infra, and finance skills in `templates/skills/` |
+| Per-agent skill assignments | Existing teams (content-factory, research-lab, dev-company) now declare specific skills per agent |
+| 37 demo starters | All curated starters re-mapped to purpose-built teams with per-agent skill assignments |
+| Skills Setup cards | Each `demo-projects/cards/<id>.md` now includes a `## Skills Setup` section listing which skills are needed and how to install them |
+| Manager skill project init | `openclaw-store-manager` guides users through missing skills conversationally — detect, explain, guide |
+| `requires.bins` field | Skill templates now declare required system binaries before `env:` under `requires:` |
+
+### Core Foundations
 
 | Feature | Description |
 |---|---|
@@ -19,7 +33,7 @@ This document explains the technical architecture: data flow, file formats, the 
 | Demo project catalog | Generated `demo-projects/index.yaml` and per-demo cards provide richer execution/setup guidance |
 | Pack compatibility | `compatibility.node_min` / `openclaw_min` in pack YAML, checked by `doctor` |
 | Skill installation | Skills are cached at `~/.openclaw-store/cache/skills/` and symlinked per workspace |
-| Test suite | 33 vitest tests covering schema, renderer, resolver, overlay, compat, skill-fetch, starters, and workflow detection |
+| Test suite | Vitest tests covering schema, renderer, resolver, overlay, compat, skill-fetch, starters, and workflow detection |
 
 ---
 
@@ -30,9 +44,15 @@ This document explains the technical architecture: data flow, file formats, the 
 │  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
 │  │  Templates   │   │     CLI      │   │ Packs/Starters │  │
 │  │  agents/     │   │  cli.ts      │   │  dev-company   │  │
-│  │  teams/      │──▶│  commands/   │◀──│  content-      │  │
-│  │  skills/     │   │  install.ts  │   │  use-case demos│  │
-│  └──────────────┘   └──────┬───────┘   └────────────────┘  │
+│  │  teams/      │──▶│  commands/   │◀──│  content-fctry │  │
+│  │  skills/     │   │  install.ts  │   │  research-lab  │  │
+│  └──────────────┘   └──────┬───────┘   │  personal-asst │  │
+│                             │          │  automation-ops│  │
+│                             │          │  customer-svc  │  │
+│                             │          │  finance-ops   │  │
+│                             │          │  data-ops      │  │
+│                             │          │  37 demos      │  │
+│                             │          └────────────────┘  │
 │                            │                                │
 │              ┌─────────────▼──────────────┐                │
 │              │         Core Lib           │                │
@@ -48,7 +68,7 @@ This document explains the technical architecture: data flow, file formats, the 
 │              ┌─────────────▼──────────────┐               │
 │              │         Adapters           │               │
 │              │  openclaw.ts (full impl)   │               │
-│              │  claude-code.ts (v2 stub)  │               │
+│              │  claude-code.ts (stub)     │               │
 │              └─────────────┬──────────────┘               │
 └────────────────────────────┼────────────────────────────────┘
                              │
@@ -269,6 +289,13 @@ The richer demo metadata is generated separately into `demo-projects/index.yaml`
 
 The renderer is the heart of the system. It turns YAML agent definitions into the Markdown files that OpenClaw reads as agent context.
 
+This boundary matters:
+
+- YAML is the `openclaw-store` authoring format
+- rendered Markdown files are the OpenClaw runtime format
+
+OpenClaw does not need to understand the team/pack/starter YAML files directly. `openclaw-store` is the layer that validates, resolves, and compiles them into OpenClaw-ready workspaces.
+
 ```
 AgentDef (YAML)         TeamDef (YAML)
 ┌─────────────────┐     ┌──────────────────┐
@@ -429,6 +456,8 @@ This keeps ownership boundaries simple:
 Use `openclaw-store skill sync` to refresh the local availability inventory in `~/.openclaw-store/skills-index.json`.
 Discovered native skills can then be referenced directly by ID in `openclaw-store.yaml`, and `install` becomes the reconciliation point that places them into targeted agent workspaces.
 
+As with agents and teams, the YAML skill template is metadata for `openclaw-store`. The runtime artifact OpenClaw actually uses is the installed skill directory inside the relevant workspace.
+
 ## Workflow Modes
 
 `openclaw-store` supports three practical modes:
@@ -443,6 +472,73 @@ Discovered native skills can then be referenced directly by ID in `openclaw-stor
    OpenClaw is installed, but the repo does not have `openclaw-store.yaml`. In this case, `openclaw-store` treats the repo as a normal OpenClaw environment unless the user opts into managed projects.
 
 This allows the `openclaw-store-manager` skill to inspect default workflows first, then migrate a repo into managed mode only when the user asks for project/team/skill orchestration.
+
+## Native Memory vs Shared Memory
+
+`openclaw-store` intentionally keeps two memory layers separate:
+
+1. **Native OpenClaw memory**
+   - lives inside each agent workspace
+   - includes `MEMORY.md` and `memory/*.md`
+   - is what OpenClaw memory tools operate on for that agent
+
+2. **Shared team memory**
+   - lives under `~/.openclaw-store/workspaces/store/<project>/<team>/shared/memory/`
+   - contains orchestration files such as `kanban.md`, `tasks-log.md`, and `blockers.md`
+   - is managed by `openclaw-store` ownership rules
+
+This is deliberate. `openclaw-store` orchestrates shared coordination state, but it does not replace or redefine OpenClaw's native memory layer.
+
+---
+
+## Interactive Project Initialization Flow
+
+When a user asks the manager skill to start a demo project, the skill:
+
+1. Runs `openclaw-store starter suggest` to identify the best match
+2. Reads `demo-projects/cards/<id>.md` for setup requirements
+3. Detects which required skills or APIs are missing
+4. Guides the user through configuring missing items conversationally
+5. Calls `openclaw-store starter init <id> <dir>` once prerequisites are met
+6. Calls `openclaw-store install` to provision the team
+
+The skill uses a **declare-and-detect** pattern:
+
+```
+starter card declares requirements
+         │
+         ▼
+manager reads cards/<id>.md
+  project_skills   → placed automatically into openclaw-store.yaml
+  installable_skills → checked via `openclaw-store skill sync`
+  required_apis      → user must configure; manager guides setup
+  required_capabilities → runtime prerequisites verified before init
+         │
+         ▼
+missing required → block + guide user
+missing optional → note + continue
+all required met → call starter init + install
+```
+
+Required skills block project initialization. Optional skills are noted but do not block. The manager explains what each missing item is for before asking the user to act.
+
+---
+
+## Available Teams
+
+The store ships 9 purpose-built teams across 9 packs:
+
+| Team | Pack | Entry point | Focus |
+|---|---|---|---|
+| `dev-company` | dev-company | `pm` | Full software development |
+| `content-factory` | content-factory | `editor` | Content, publishing, media |
+| `research-lab` | research-lab | `research-lead` | Research, analysis, reports |
+| `autonomous-startup` | autonomous-startup | varies | Full-stack autonomy |
+| `personal-assistant` | personal-assistant | `personal-assistant-lead` | Life admin, calendar, health |
+| `automation-ops` | automation-ops | `automation-lead` | Workflows, integrations, comms |
+| `customer-service` | customer-service | `service-lead` | Multi-channel customer support |
+| `finance-ops` | finance-ops | `finance-lead` | Markets, trading, risk |
+| `data-ops` | data-ops | `data-lead` | ETL, analytics, storage |
 
 ---
 
@@ -720,7 +816,7 @@ source:
 trust_tier: curated | community | local
 
 requires:
-  bins:                       # required system binaries
+  bins:                       # required system binaries (declare [] if none — must come BEFORE env:)
     - string
   env:
     - key: string             # env var name
@@ -853,7 +949,7 @@ packs:
     project_id: acme-web
     source_id: dev-company
     team_id: dev-company
-    version: 1.0.0
+    version: <pack-version>
     agents:
       - id: store__acme-web__dev-company__pm
         workspace: /Users/you/.openclaw-store/workspaces/store/acme-web/dev-company/pm
@@ -866,7 +962,7 @@ packs:
     project_id: acme-web
     source_id: research-lab
     team_id: research-lab
-    version: 1.0.0
+    version: <pack-version>
     agents:
       - id: store__acme-web__research-lab__research-lead
         workspace: /Users/you/.openclaw-store/workspaces/store/acme-web/research-lab/research-lead
@@ -896,7 +992,7 @@ openclaw-store install --dry-run           # preview only, no lockfile write
 
 ---
 
-## Extension Points (v2 Roadmap)
+## Extension Points And Roadmap
 
 | Feature | Where to add |
 |---|---|

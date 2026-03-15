@@ -68,6 +68,12 @@ The wizard creates `openclaw-store.yaml`, which declares which packs and skills 
 It also writes a `project` block so installs are namespaced by project ID.
 This is the scratch/manual managed path, not the only entry path.
 
+Important boundary:
+
+- `openclaw-store.yaml` is the project authoring format for `openclaw-store`
+- OpenClaw itself runs from the rendered workspace files, not directly from this YAML
+- `install` is the compilation/reconciliation step that turns YAML into OpenClaw-ready workspaces
+
 ## 3. Preview and install
 
 ```bash
@@ -78,6 +84,8 @@ openclaw-store doctor
 
 This installs the selected teams, seeds shared memory files, and patches `~/.openclaw/openclaw.json` unless you use `--no-openclaw`.
 Starter-based projects also include `DEMO_PROJECT.md`, copied from the richer demo card.
+
+The installed agent workspaces contain the Markdown files OpenClaw actually reads, such as `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, and `MEMORY.md`.
 
 ## 4. Find the right team entry point
 
@@ -94,6 +102,20 @@ openclaw-store agent show pm
 ```
 
 Each team has one `entry_point: true` agent. That agent is the normal front door for the team.
+
+The 9 available packs and their entry points:
+
+| Pack | Entry point | Best for |
+|---|---|---|
+| `dev-company` | `pm` | Software development projects |
+| `content-factory` | `editor` | Content, publishing, media |
+| `research-lab` | `research-lead` | Research, analysis, trend reports |
+| `autonomous-startup` | varies | Full-stack product/ops autonomy |
+| `personal-assistant` | `personal-assistant-lead` | Life admin, calendar, health, knowledge |
+| `automation-ops` | `automation-lead` | Workflow automation, integrations, notifications |
+| `customer-service` | `service-lead` | Multi-channel customer support |
+| `finance-ops` | `finance-lead` | Market analysis, trading, risk management |
+| `data-ops` | `data-lead` | Data pipelines, analytics, storage |
 
 `openclaw-store agent list` now shows both:
 
@@ -143,6 +165,8 @@ They coordinate by:
 - reading and writing shared memory files
 - following the team graph and shared memory ownership rules
 
+This shared memory is an orchestration layer managed by `openclaw-store`. It does not replace OpenClaw's native memory tools for each agent workspace.
+
 In practice:
 
 - talk to the team entry point for normal project work
@@ -153,6 +177,8 @@ In practice:
 
 Skills are installed into agent workspaces during `openclaw-store install`.
 
+Skill YAML in `templates/skills/*.yaml` is metadata for `openclaw-store` to understand source, env requirements, and install hints. OpenClaw ultimately sees the installed skill folders inside workspaces, not the YAML metadata itself.
+
 You do not open a skill directly in OpenClaw. Instead:
 
 1. Add the skill to `openclaw-store.yaml`
@@ -160,23 +186,28 @@ You do not open a skill directly in OpenClaw. Instead:
 3. Run `openclaw-store install`
 4. Talk to the agent or team entry point that has the skill available
 
-For external skills or APIs, the expected flow is:
+### Declare-and-detect model
 
-1. `openclaw-store-manager` identifies the missing requirement from the demo card or skill template
-2. OpenClaw guides the user through installing or configuring it
-3. Optionally run `openclaw-store skill sync` to refresh local availability
-4. Re-run `openclaw-store install`
-5. Verify placement with `openclaw-store skill check`
+Each demo card (`demo-projects/cards/<id>.md`) includes a `## Skills Setup` section that lists:
 
-The demo card should distinguish:
-
-- `project_skills`: skills the starter already places into the generated manifest
+- `project_skills`: skills the starter already places into the generated manifest — installed automatically
 - `installable_skills`: OpenClaw skills the user may need to install or sync before attaching them
 - `required_apis`: external APIs, SaaS integrations, or auth the user must configure
 - `required_capabilities`: runtime/tool prerequisites such as `sessions_spawn`, Git, SSH, or filesystem access
 
-If a required environment variable is missing, the skill is installed as inactive.
-Project skills are not automatically attached to every agent. They are installed where the agent template or project targets place them.
+When a user asks the `openclaw-store-manager` skill to start a demo project, it reads the card, detects what is missing, explains each missing item, and guides the user through setup before initializing the project. Required skills and APIs block initialization. Optional skills are noted but do not block.
+
+### Manual skill setup
+
+For external skills or APIs without the manager skill:
+
+1. Identify missing requirements from the demo card or skill template `install_hints`
+2. Install or configure the external tool or API key
+3. Optionally run `openclaw-store skill sync` to refresh local availability
+4. Re-run `openclaw-store install`
+5. Verify placement with `openclaw-store skill check`
+
+If a required environment variable is missing, the skill is installed as inactive. Project skills are not automatically attached to every agent — they are placed only where the agent template or project targets declare them.
 
 You can target skills from `openclaw-store.yaml`:
 
@@ -227,12 +258,42 @@ The runtime install path will be project-scoped even when the team template is r
 
 To create a custom skill in this repo:
 
-1. Add `templates/skills/my-skill.yaml`
-2. Reference it from the agent templates that should receive it
+1. Add `templates/skills/my-skill.yaml` following the `SkillEntry` schema
+2. Reference it from the agent templates that should receive it (add to `skills:` list)
 3. Add it to the project's `openclaw-store.yaml`
 4. Run `openclaw-store install`
 
-If the skill needs environment variables, declare them in the skill YAML and set them before install.
+Minimum skill YAML structure:
+
+```yaml
+id: my-skill
+version: 1
+name: "My Skill"
+description: "What this skill does"
+
+source:
+  type: clawhub
+  url: "https://clawhub.ai/<developer>/my-skill"
+  pin: "latest"
+
+trust_tier: community
+
+requires:
+  bins: []                    # declare [] even if no binaries required — must come before env:
+  env:
+    - key: MY_API_KEY
+      description: "API key for the service"
+      required: true
+
+disabled_until_configured: true
+
+install_hints:
+  - "Get your API key at https://example.com/api-keys"
+  - "Set: export MY_API_KEY=..."
+  - "Then re-run: openclaw-store install"
+```
+
+If the skill needs environment variables, declare them in `requires.env` and set them before install. The `disabled_until_configured: true` flag marks the skill inactive until all required env vars are present, and `openclaw-store doctor` will surface it.
 
 ## 10. Add more projects in the future
 

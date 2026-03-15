@@ -40,7 +40,7 @@ graph:
     relationship: requests_review
 
 shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/dev-company/shared/memory/"
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/<team-id>/shared/memory/"
   files:
     - path: tasks-log.md
       access: append-only

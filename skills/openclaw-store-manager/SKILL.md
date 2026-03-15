@@ -11,9 +11,11 @@ It must also work safely when a repo is not yet managed by `openclaw-store`.
 
 ## Use It For
 
+- Bootstrapping `openclaw-store` itself when the user only provided this `SKILL.md`
 - Listing installed projects and entry points
 - Listing, inspecting, and initializing starter demo projects
 - Reading demo-project metadata and starter cards to choose between default workflow and managed workflow
+- Promoting an ad hoc OpenClaw workflow into `default-managed` or a fuller managed project
 - Inspecting a project's manifest, lockfile, and runtime registration
 - Adding or removing packs in `openclaw-store.yaml`
 - Adding a skill to a project and targeting it to the correct agents or teams
@@ -33,12 +35,29 @@ It must also work safely when a repo is not yet managed by `openclaw-store`.
   openclaw-store scaffolds the project structure, agents, and skill targeting.
 - Single-agent mode: use `default-managed` starter — one generalist agent, no team overhead.
   Do not build a full team unless the user explicitly wants multi-agent coordination.
-- Available teams: dev-company, content-factory, research-lab, autonomous-startup, personal-assistant, automation-ops, customer-service, finance-ops, data-ops
+- Available bundled teams: dev-company, content-factory, research-lab, autonomous-startup
 - Skills are per agent, not per team. Each agent YAML declares its own skills list.
-- Required skills block install. Optional skills never block install.
-- For family-calendar demo: ask the user which calendar system they use before targeting skills.
 
 ## Workflow
+
+### 0. Bootstrap `openclaw-store` if needed
+
+If the user gave you this `SKILL.md` directly and `openclaw-store` is not yet available:
+
+1. Check whether `openclaw-store` is already on PATH.
+2. If not, acquire the repo locally:
+   - if the current workspace is already the `openclaw-store` repo, use it
+   - otherwise clone the repo the user referenced
+3. From the repo root, run:
+   - `npm install`
+   - `npm run build`
+   - `npm link`
+4. Verify with:
+   - `openclaw-store --help`
+5. Then continue with the normal zero-config bootstrap:
+   - `openclaw-store install`
+
+If the user does not want a local CLI install, explain that this skill can still guide the workflow conceptually, but project initialization and managed install steps require the `openclaw-store` command to exist locally.
 
 ### 1. Inspect the current state
 
@@ -63,6 +82,20 @@ If the repo is not managed yet:
 - do not claim missing `openclaw-store.yaml` is an error by itself
 - suggest `openclaw-store init` only when the user wants managed projects, teams, or skills
 
+If the user already has a working ad hoc OpenClaw workflow and wants structure:
+
+1. inspect the current repo and runtime state
+2. list the skills they already rely on
+3. decide whether they need:
+   - default workflow only
+   - `default-managed`
+   - a fuller starter/team install
+4. if the workflow is repeated, shared, or coordination-heavy, recommend promotion
+5. create or edit `openclaw-store.yaml`
+6. target discovered OpenClaw skills into the project
+7. run `openclaw-store install`
+8. tell the user which entry-point agent to use next
+
 If the user is starting from an idea:
 
 1. run `openclaw-store starter suggest "<idea>"`
@@ -80,6 +113,31 @@ If no starter is close enough:
 - initialize it
 - modify the generated project manifest rather than building everything from scratch
 - explain which parts were inherited vs customized
+
+### 1b. Promote to project
+
+When the user says things like:
+
+- "turn this into a project"
+- "make this repeatable"
+- "I already have the skills, now organize it"
+- "should this become a team"
+
+follow this promotion flow:
+
+1. detect current mode: default OpenClaw, default Claude Code, or already managed
+2. inspect currently available skills with `openclaw-store skill sync`
+3. identify whether the workflow is:
+   - single-agent but persistent
+   - multi-step with repeated tools
+   - multi-agent or delegation-heavy
+4. recommend:
+   - stay unmanaged
+   - `default-managed`
+   - closest starter + customization
+5. initialize the project
+6. attach or retarget the existing skills the user already has in OpenClaw
+7. run install, then hand off to the managed project entry-point agent
 
 ### 2. Add or retarget a skill
 
@@ -175,7 +233,7 @@ When a user asks to spin up a project or demo, follow this sequence exactly:
 
 ### Step 1: Suggest a starter
 Run `openclaw-store starter suggest "<user idea>"`.
-Present the closest match: name, team, agents, required skills, optional skills.
+Present the closest match: name, entry team, project skills, installable skills, required APIs, and required capabilities.
 
 ### Step 2: Confirm and initialize
 Once the user confirms the starter and target directory:
@@ -186,38 +244,31 @@ Once the user confirms the starter and target directory:
 ### Step 3: Detect skill gaps
 Run `openclaw-store skill sync`
 - This checks what is already installed in OpenClaw
-- Compare against each agent's declared skills
+- Compare against the project's targeted skills and the demo card's `installable_skills`
 - If skill sync fails (OpenClaw offline or unreachable): warn the user and ask them to confirm each required skill manually before you proceed
 
-### Step 4: Guide missing required skills (blocking)
-For each required skill not yet installed:
+### Step 4: Guide missing skills and auth
+For each missing or inactive skill the user wants in the project:
 1. State which skill is missing and which agent(s) need it
-2. Provide the install command: `clawhub install <skill-slug>`
-3. Provide the env var to set and where to get the key (read from the demo card's Skills Setup section)
-4. Wait for the user to confirm they have installed it
-5. Re-run `openclaw-store skill sync` to confirm presence
-6. Repeat until all required skills are present
+2. If it is an OpenClaw skill, guide the user to install it in OpenClaw first
+3. Use `openclaw-store skill show <skill-id>` and demo metadata to explain env vars or API auth that are still missing
+4. Re-run `openclaw-store skill sync` to confirm presence when relevant
+5. Only target the skill into the managed project once it exists or the user explicitly wants to proceed without it
 
-Required skills BLOCK `openclaw-store install`. Do not proceed until all are confirmed.
+### Step 5: Install
+After the starter and skill targeting are in the right state, run the managed install.
 
-### Step 5: Mention optional skills (non-blocking)
-After all required skills are confirmed, mention any optional skills from `installable_skills`:
-"These optional skills will enhance the project but are not required:
-• `<skill-id>` — <what it adds> (install with: clawhub install <skill-id>)"
-Do not wait for optional skills. Proceed immediately.
-
-### Step 6: Install
 Run from the project directory:
 ```
 cd <dir>
 openclaw-store install
 ```
 
-### Step 7: Verify
+### Step 6: Verify
 Run `openclaw-store doctor`
-All agents and required skills must be healthy.
+All installed agents and targeted skills should be healthy.
 
-### Step 8: Hand off to user
+### Step 7: Hand off to user
 Tell the user:
 - The exact agent ID to open in OpenClaw (the entry-point agent)
 - A concrete first task to give that agent, based on the demo's bootstrap_prompt

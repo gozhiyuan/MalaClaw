@@ -30,7 +30,7 @@ graph:
     relationship: delegates_to
 
 shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/content-factory/shared/memory/"
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/<team-id>/shared/memory/"
   files:
     - path: pipeline-log.md
       access: append-only

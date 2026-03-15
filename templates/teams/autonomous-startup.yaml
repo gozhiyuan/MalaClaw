@@ -10,7 +10,7 @@ members:
 graph: []
 
 shared_memory:
-  dir: "~/.openclaw-store/workspaces/store/autonomous-startup/shared/memory/"
+  dir: "~/.openclaw-store/workspaces/store/<project-id>/<team-id>/shared/memory/"
   files:
     - path: goals.md
       access: single-writer
