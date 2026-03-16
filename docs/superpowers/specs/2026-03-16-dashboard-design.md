@@ -16,7 +16,7 @@ Before building the dashboard, several CLI command functions must be extracted i
 |-----------------|---------|-------------------|
 | `src/commands/doctor.ts` → `runDoctor()` | Writes to stdout, calls `process.exit` | Extract check logic into `src/lib/doctor.ts` returning `Finding[]` |
 | `src/commands/diff.ts` → `runDiff()` | Writes to stdout, returns `void` | Extract diff computation into `src/lib/diff.ts` returning `DiffEntry[]` |
-| `src/commands/install.ts` → `runInstall()` | Uses `@clack/prompts`, calls `process.exit` | Extract headless install into `src/lib/install.ts` with progress callbacks |
+| `src/commands/install.ts` → `runInstall()` | Uses `@clack/prompts`, calls `process.exit` | Extract headless install into `src/lib/install-headless.ts` with progress callbacks |
 | `src/commands/skill.ts` → skill sync/check | CLI-coupled output | Extract `syncSkills()` and `checkSkills()` into `src/lib/skill-ops.ts` |
 | `src/commands/starter.ts` → starter init | CLI-coupled, interactive | Extract `initStarter(id, targetDir, projectName)` into `src/lib/starter-ops.ts` |
 
@@ -179,7 +179,7 @@ dashboard/
 |--------|----------|--------|---------|
 | GET | `/api/skills` | `loader.loadAllSkills()` + skill inventory | Skills with install status |
 | POST | `/api/skills/sync` | `skillOps.syncSkills()` (extracted to `src/lib/skill-ops.ts`) | Sync result |
-| POST | `/api/skills/check` | `skillOps.checkSkills()` (extracted to `src/lib/skill-ops.ts`) | Missing envs, failed skills |
+| GET | `/api/skills/check` | `skillOps.checkSkills()` (extracted to `src/lib/skill-ops.ts`) | Missing envs, failed skills |
 
 ### Health
 
@@ -202,7 +202,7 @@ dashboard/
 | GET | `/api/manifest` | `loader.loadManifest()` | Parsed `openclaw-store.yaml` |
 | PUT | `/api/manifest` | Validate + write YAML | Updated manifest |
 | GET | `/api/diff` | `diff.computeDiff()` (extracted to `src/lib/diff.ts`) | `DiffEntry[]` — pending changes |
-| POST | `/api/install` | `install.runHeadless()` (extracted to `src/lib/install.ts`) | Install result. Streams progress via WS. |
+| POST | `/api/install` | `runHeadlessInstall()` (extracted to `src/lib/install-headless.ts`) | Install result. Streams progress via WS. |
 
 ## WebSocket Events
 
@@ -215,6 +215,7 @@ Events pushed to all connected clients when files change on disk:
 | `lockfile:changed` | `openclaw-store.lock` modified | `{ projectDir }` |
 | `skills:changed` | `skills-index.json` modified | `{}` |
 | `memory:changed` | Any shared memory `.md` modified | `{ projectId, teamId, file }` |
+| `install:progress` | Install pipeline emits progress | `{ phase, message, current?, total? }` |
 
 Frontend `useWs` hook maps events to React Query invalidation keys:
 - `projects:changed` → invalidate `["projects"]`
