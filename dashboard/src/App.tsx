@@ -1,7 +1,9 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import { Dashboard } from "./pages/Dashboard";
+import { useWs } from "./hooks/useWs";
 
 export function App() {
+  useWs();
   const tabs = [
     { to: "/", label: "Overview" },
     { to: "/projects", label: "Projects" },
