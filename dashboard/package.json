@@ -1,0 +1,38 @@
+{
+  "name": "openclaw-store-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"tsx watch server/index.ts\" \"vite\"",
+    "build": "tsc -p tsconfig.server.json && vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "vite build",
+    "preview": "node dist/server/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@fastify/static": "^8.0.0",
+    "@fastify/cors": "^10.0.0",
+    "chokidar": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@tanstack/react-query": "^5.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^9.0.0",
+    "jsdom": "^25.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}
