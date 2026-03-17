@@ -7,4 +7,6 @@ dist/
 # Dashboard
 dashboard/dist/
 dashboard/node_modules/
+dashboard/server/**/*.js
+dashboard/server/**/*.d.ts
 *.tsbuildinfo
