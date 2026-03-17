@@ -1,5 +1,8 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import { Dashboard } from "./pages/Dashboard";
+import { Projects } from "./pages/Projects";
+import { Starters } from "./pages/Starters";
+import { Config } from "./pages/Config";
 import { useWs } from "./hooks/useWs";
 
 export function App() {
@@ -39,9 +42,9 @@ export function App() {
       <main style={{ padding: 12 }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/projects" element={<div>Projects (TODO)</div>} />
-          <Route path="/starters" element={<div>Starters (TODO)</div>} />
-          <Route path="/config" element={<div>Config (TODO)</div>} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/starters" element={<Starters />} />
+          <Route path="/config" element={<Config />} />
         </Routes>
       </main>
     </div>
