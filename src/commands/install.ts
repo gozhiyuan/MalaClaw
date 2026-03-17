@@ -1,21 +1,19 @@
-import { loadManifest, loadSkill, writeLockfile } from "../lib/loader.js";
+import { loadManifest, loadSkill } from "../lib/loader.js";
 import { resolveManifest, type ResolvedPack } from "../lib/resolver.js";
 import {
-  installTeam,
   planInstallTeam,
   updateStoreGuidance,
-  readOpenClawConfig,
-  writeOpenClawConfig,
-  addSkillsToAgentAllowlists,
   type InstallAction,
 } from "../lib/adapters/openclaw.js";
-import { seedTeamSharedMemory } from "../lib/memory.js";
-import { resolveLockfilePath, resolveMainAgentWorkspaceDir, resolveManifestPath, resolveStoreWorkspacesRoot } from "../lib/paths.js";
-import fs from "node:fs/promises";
+import { resolveMainAgentWorkspaceDir } from "../lib/paths.js";
 import path from "node:path";
-import type { LockedSkill, Lockfile, RuntimeAttachedAgent, RuntimeProject } from "../lib/schema.js";
-import { upsertRuntimeProject } from "../lib/runtime.js";
-import { resolveOpenClawAgentsById } from "../lib/openclaw-agents.js";
+import {
+  runHeadlessInstall,
+  finalizeLockfileSkills,
+  shouldInstallSkillForAgent,
+  buildRuntimeProject,
+  type InstallOpts,
+} from "../lib/install-headless.js";
 
 export type InstallOptions = {
   dryRun?: boolean;
@@ -24,37 +22,31 @@ export type InstallOptions = {
   projectDir?: string;
 };
 
-type FinalSkillState = {
-  status: LockedSkill["status"];
-  missingEnv: string[];
-  installError?: string;
-};
+// Re-export pure helpers so existing consumers (tests, etc.) keep working
+export { finalizeLockfileSkills, shouldInstallSkillForAgent, buildRuntimeProject };
 
 export async function runInstall(opts: InstallOptions = {}): Promise<void> {
-  let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; packs: { id: string }[]; skills: never[] };
-  try {
-    manifest = opts.pack
-      ? { version: 1, packs: [{ id: opts.pack }], skills: [] }
-      : await loadManifest(opts.projectDir);
-  } catch (err) {
-    if (!opts.pack && isManifestNotFoundError(err)) {
-      await runZeroConfigInstall(opts);
+  // The dryRun path needs resolved pack data for printDryRun, so we handle it before headless
+  if (opts.dryRun) {
+    let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; packs: { id: string }[]; skills: never[] };
+    try {
+      manifest = opts.pack
+        ? { version: 1, packs: [{ id: opts.pack }], skills: [] }
+        : await loadManifest(opts.projectDir);
+    } catch (err) {
+      if (!opts.pack && isManifestNotFoundError(err)) {
+        await runZeroConfigInstall(opts);
+        return;
+      }
+      throw err;
+    }
+    const { project, packs, skills } = await resolveManifest(manifest, {
+      projectDir: opts.projectDir,
+    });
+    if (packs.length === 0 && skills.length === 0) {
+      console.log("Nothing to install.");
       return;
     }
-    throw err;
-  }
-
-  console.log("Resolving manifest...");
-  const { project, packs, skills, lockfile } = await resolveManifest(manifest, {
-    projectDir: opts.projectDir,
-  });
-
-  if (packs.length === 0 && skills.length === 0) {
-    console.log("Nothing to install.");
-    return;
-  }
-
-  if (opts.dryRun) {
     printDryRun(project.id, packs);
     printSkillStatus(skills.map((s) => ({
       id: s.skillDef.id,
@@ -64,278 +56,72 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
     return;
   }
 
-  // Ensure store workspace root exists
-  await fs.mkdir(resolveStoreWorkspacesRoot(), { recursive: true });
-  const finalSkillStates = new Map<string, FinalSkillState>(
-    skills.map((skill) => [
-      skill.skillDef.id,
-      {
-        status: skill.status,
-        missingEnv: skill.missingEnv,
+  try {
+    const result = await runHeadlessInstall({
+      ...opts,
+      onProgress: (p) => {
+        if (p.phase === "installing" || p.phase === "finalizing" || p.phase === "resolving") {
+          console.log(p.message);
+        } else if (p.phase === "skills") {
+          // skill progress is already logged inline; suppress duplicates
+        }
       },
-    ]),
-  );
-  const attachedAgents = (await resolveOpenClawAgentsById(project.attachedAgents)).map((agent) => ({
-    id: agent.id,
-    name: agent.name,
-    workspace: agent.workspace,
-    agent_dir: agent.agentDir,
-    source: "project-attached" as const,
-  }));
+    } as InstallOpts);
 
-  // workspaceDir → agentId map for allowlist patching after skills are installed
-  const workspaceDirToAgentId = new Map<string, string>();
+    // Report skill status from result
+    const activeSkills = result.skillStatuses.filter((s) => s.status === "active");
+    const inactiveSkills = result.skillStatuses.filter((s) => s.status === "inactive");
+    const failedSkills = result.skillStatuses.filter((s) => s.status === "failed");
 
-  // Install each pack
-  for (const resolved of packs) {
-    console.log(`\nInstalling pack: ${resolved.packId} (v${resolved.version})`);
-
-    const agentsWithMembers = await Promise.all(
-      resolved.agents.map(async (a) => {
-        const member = resolved.teamDef.members.find((m) => m.agent === a.agentDef.id)!;
-        workspaceDirToAgentId.set(a.workspaceDir, a.agentId);
-        return {
-          agentDef: a.agentDef,
-          member,
-          workspaceDir: a.workspaceDir,
-          agentDir: a.agentDir,
-        };
-      }),
-    );
-
-    await installTeam({
-      projectId: project.id,
-      teamDef: resolved.teamDef,
-      agents: agentsWithMembers,
-      overwrite: opts.force,
-    });
-
-    console.log(`  Seeding shared memory for ${resolved.teamDef.name ?? resolved.teamDef.id}...`);
-    await seedTeamSharedMemory(project.id, resolved.teamDef);
-
-    for (const agent of agentsWithMembers) {
-      const status = opts.force ? "updated" : "created";
-      console.log(`  ✓ ${agent.agentDef.name} (${agent.agentDef.id}) — workspace ${status}`);
-    }
-  }
-
-  // Update main agent guidance
-  console.log("\nUpdating main agent guidance (TOOLS.md, AGENTS.md)...");
-  await updateStoreGuidance();
-
-  // Install skills into each agent workspace that lists them
-  // Collect (skillId → agentIds) pairs for allowlist patching after all skills are installed
-  const skillToAgentIds = new Map<string, string[]>();
-  if (skills.length > 0) {
-    const { installSkillToWorkspaces } = await import("../lib/skill-fetch.js");
-    for (const resolvedSkill of skills) {
-      const targetWorkspaces = new Set<string>();
-      for (const pack of packs) {
-        for (const agent of pack.agents) {
-          if (shouldInstallSkillForAgent(pack, agent, resolvedSkill)) {
-            targetWorkspaces.add(agent.workspaceDir);
-          }
-        }
-      }
-      for (const attachedAgent of attachedAgents) {
-        if (
-          attachedAgent.workspace
-          && resolvedSkill.targets?.agents?.includes(attachedAgent.id)
-        ) {
-          targetWorkspaces.add(attachedAgent.workspace);
-          workspaceDirToAgentId.set(attachedAgent.workspace, attachedAgent.id);
-        }
-      }
-      if (targetWorkspaces.size === 0) continue;
-      const results = await installSkillToWorkspaces(
-        resolvedSkill.skillDef,
-        [...targetWorkspaces],
-        resolvedSkill.status,
-      );
-      const failures = results.filter((r) => r.status === "failed");
-      if (failures.length > 0) {
-        finalSkillStates.set(resolvedSkill.skillDef.id, {
-          status: "failed",
-          missingEnv: resolvedSkill.missingEnv,
-          installError: failures
-            .map((r) => r.reason ?? `Failed to install into ${r.targetDir}`)
-            .join("; "),
-        });
-      }
-      const installedAgentIds: string[] = [];
-      for (const r of results) {
-        if (r.status === "installed") {
-          console.log(`  ✓ Skill ${resolvedSkill.skillDef.id} → ${r.targetDir}`);
-          // targetDir is workspaceDir/skills/skillId — strip /skills/<id> to get workspaceDir
-          const workspaceDir = r.targetDir.replace(/\/skills\/[^/]+$/, "");
-          const mappedId = workspaceDirToAgentId.get(workspaceDir);
-          if (mappedId) installedAgentIds.push(mappedId);
-        } else if (r.status === "failed") {
-          console.warn(`  ✗ Skill ${resolvedSkill.skillDef.id} failed: ${r.reason}`);
-        }
-      }
-      if (installedAgentIds.length > 0) {
-        skillToAgentIds.set(resolvedSkill.skillDef.id, installedAgentIds);
-      }
+    if (result.packsInstalled.length === 0 && result.skillStatuses.length === 0) {
+      // nothing happened — message already emitted via onProgress
     }
 
-    // Patch agent allowlists in openclaw.json for agents with explicit skills[] keys
-    if (skillToAgentIds.size > 0) {
-      const { path: configPath, config } = await readOpenClawConfig();
-      for (const [skillId, agentIds] of skillToAgentIds) {
-        addSkillsToAgentAllowlists(config, agentIds, [skillId]);
-      }
-      await writeOpenClawConfig(configPath, config);
+    if (activeSkills.length > 0) {
+      console.log(`\nSkills activated: ${activeSkills.map((s) => s.id).join(", ")}`);
     }
-  }
-
-  const finalLockfile = finalizeLockfileSkills(lockfile, finalSkillStates);
-
-  // Write lockfile
-  if (!opts.pack) {
-    await writeLockfile(finalLockfile, opts.projectDir);
-    console.log("\nWrote openclaw-store.lock");
-  }
-
-  await upsertRuntimeProject(buildRuntimeProject(project, packs, finalLockfile, {
-    manifestPath: opts.pack ? undefined : resolveManifestPath(opts.projectDir),
-    lockfilePath: opts.pack ? undefined : resolveLockfilePath(opts.projectDir),
-  }, attachedAgents));
-
-  // Report skill status
-  const activeSkills = finalLockfile.skills.filter((s) => s.status === "active");
-  const inactiveSkills = finalLockfile.skills.filter((s) => s.status === "inactive");
-  const failedSkills = finalLockfile.skills.filter((s) => s.status === "failed");
-
-  if (activeSkills.length > 0) {
-    console.log(`\nSkills activated: ${activeSkills.map((s) => s.id).join(", ")}`);
-  }
-
-  if (inactiveSkills.length > 0) {
-    console.log("\n⚠ Inactive skills (missing required env vars):");
-    for (const s of inactiveSkills) {
-      console.log(`  [INACTIVE] ${s.id} — missing: ${s.missing_env?.join(", ")}`);
-      const hints = skills.find((skill) => skill.skillDef.id === s.id)?.skillDef.install_hints;
-      if (hints && hints.length > 0) {
-        for (const h of hints) {
-          console.log(`    → ${h}`);
-        }
+    if (inactiveSkills.length > 0) {
+      console.log("\n⚠ Inactive skills (missing required env vars):");
+      for (const s of inactiveSkills) {
+        console.log(`  [INACTIVE] ${s.id} — missing: ${(s.missingEnv ?? []).join(", ")}`);
       }
     }
-  }
-
-  if (failedSkills.length > 0) {
-    console.log("\n✗ Skills failed to install:");
-    for (const s of failedSkills) {
-      console.log(`  [FAILED] ${s.id} — ${s.install_error ?? "install failed"}`);
+    if (failedSkills.length > 0) {
+      console.log("\n✗ Skills failed to install:");
+      for (const s of failedSkills) {
+        console.log(`  [FAILED] ${s.id}`);
+      }
     }
+  } catch (err) {
+    if (!opts.pack && isManifestNotFoundError(err)) {
+      await runZeroConfigInstall(opts);
+      return;
+    }
+    throw err;
   }
-
-  const totalAgents = packs.reduce((n, p) => n + p.agents.length, 0);
-  console.log(
-    `\n✓ Installation complete. ${totalAgents} agent(s) installed across ${packs.length} pack(s).`,
-  );
-}
-
-export function finalizeLockfileSkills(
-  lockfile: Lockfile,
-  finalSkillStates: Map<string, FinalSkillState>,
-): Lockfile {
-  return {
-    ...lockfile,
-    skills: lockfile.skills.map((skill) => {
-      const finalState = finalSkillStates.get(skill.id);
-      if (!finalState) return skill;
-      return {
-        ...skill,
-        status: finalState.status,
-        missing_env: finalState.missingEnv.length > 0 ? finalState.missingEnv : undefined,
-        install_error: finalState.status === "failed" ? finalState.installError : undefined,
-      };
-    }),
-  };
 }
 
 function printDryRun(projectId: string, packs: ResolvedPack[]): void {
   console.log("\n[DRY RUN] Actions that would be performed:\n");
-
   for (const resolved of packs) {
     console.log(`Pack: ${resolved.packId} (v${resolved.version})`);
-
     const agentsWithMembers = resolved.agents.map((a) => ({
       agentDef: a.agentDef,
       member: resolved.teamDef.members.find((m) => m.agent === a.agentDef.id)!,
       workspaceDir: a.workspaceDir,
       agentDir: a.agentDir,
     }));
-
     const actions: InstallAction[] = planInstallTeam({
       projectId,
       teamDef: resolved.teamDef,
       agents: agentsWithMembers,
       dryRun: true,
     });
-
     for (const action of actions) {
       console.log(`  [${action.type}] ${action.description}`);
       console.log(`    → ${action.path}`);
     }
   }
-}
-
-function shouldInstallSkillForAgent(
-  pack: ResolvedPack,
-  agent: ResolvedPack["agents"][number],
-  resolvedSkill: { skillDef: { id: string }; targets?: { agents?: string[]; teams?: string[] } },
-): boolean {
-  if (agent.agentDef.skills?.includes(resolvedSkill.skillDef.id)) {
-    return true;
-  }
-
-  const targetTeams = new Set(resolvedSkill.targets?.teams ?? []);
-  if (targetTeams.has(pack.teamDef.id)) {
-    return true;
-  }
-
-  const targetAgents = new Set(resolvedSkill.targets?.agents ?? []);
-  return targetAgents.has(agent.agentDef.id) || targetAgents.has(agent.agentId);
-}
-
-function buildRuntimeProject(
-  project: { id: string; name?: string; description?: string; starter?: string; entryTeam?: string; projectDir: string },
-  packs: ResolvedPack[],
-  lockfile: Lockfile,
-  opts: { manifestPath?: string; lockfilePath?: string },
-  attachedAgents: RuntimeAttachedAgent[] = [],
-): RuntimeProject {
-  const entryPoints = packs.flatMap((pack) => {
-    const entryMember = pack.teamDef.members.find((m) => m.entry_point);
-    if (!entryMember) return [];
-    const resolvedAgent = pack.agents.find((a) => a.agentDef.id === entryMember.agent);
-    if (!resolvedAgent) return [];
-    return [{
-      team_id: pack.teamDef.id,
-      agent_id: entryMember.agent,
-      openclaw_agent_id: resolvedAgent.agentId,
-      agent_name: resolvedAgent.agentDef.name,
-    }];
-  });
-
-  return {
-    id: project.id,
-    name: project.name,
-    description: project.description,
-    starter: project.starter,
-    entry_team: project.entryTeam,
-    project_dir: project.projectDir,
-    manifest_path: opts.manifestPath,
-    lockfile_path: opts.lockfilePath,
-    packs: (lockfile.packs ?? []).map((p) => p.id),
-    skills: (lockfile.skills ?? []).map((s) => s.id),
-    entry_points: entryPoints,
-    attached_agents: attachedAgents,
-    updated_at: new Date().toISOString(),
-  };
 }
 
 type SkillStatus = { id: string; status: "active" | "inactive"; missingEnv: string[] };
@@ -360,11 +146,9 @@ async function runZeroConfigInstall(opts: InstallOptions): Promise<void> {
   const mainWorkspaceDir = resolveMainAgentWorkspaceDir();
   console.log("openclaw-store: no manifest found.");
   console.log("Installing openclaw-store-manager skill into OpenClaw main agent workspace...\n");
-
   const skillDef = await loadSkill("openclaw-store-manager");
   const { installSkillToWorkspaces } = await import("../lib/skill-fetch.js");
   const results = await installSkillToWorkspaces(skillDef, [mainWorkspaceDir], "active");
-
   const skillDir = path.join(mainWorkspaceDir, "skills", "openclaw-store-manager");
   const installed = results.some((r) => r.status === "installed");
   if (installed) {
@@ -375,9 +159,7 @@ async function runZeroConfigInstall(opts: InstallOptions): Promise<void> {
     console.warn(`✗ Failed to install openclaw-store-manager: ${reason}`);
     return;
   }
-
   await updateStoreGuidance();
-
   console.log("The skill is now available in OpenClaw. Ask your agent to:");
   console.log("  1. Run: openclaw-store starter list");
   console.log("  2. Pick a starter and run: openclaw-store starter init <id> ./my-project");
