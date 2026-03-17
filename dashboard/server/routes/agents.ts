@@ -6,9 +6,13 @@ const routes: FastifyPluginAsync = async (app) => {
     return store.getAgents();
   });
 
-  app.get("/api/agents/:id", async (req) => {
+  app.get("/api/agents/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    return store.getAgent(id);
+    try {
+      return await store.getAgent(id);
+    } catch {
+      return reply.status(404).send({ error: `Agent "${id}" not found`, code: "NOT_FOUND", details: {} });
+    }
   });
 };
 

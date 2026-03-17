@@ -91,7 +91,10 @@ export function useInstall() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { projectDir?: string }) =>
-      fetch(`${BASE}/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+      fetch(`${BASE}/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => {
+        if (!r.ok) return r.json().then((b: any) => { throw new Error(b.error ?? `HTTP ${r.status}`); });
+        return r.json();
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["projects"] });
       qc.invalidateQueries({ queryKey: ["skills"] });
@@ -103,7 +106,10 @@ export function useInitStarter() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; targetDir: string; projectName?: string }) =>
-      fetch(`${BASE}/starters/${id}/init`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+      fetch(`${BASE}/starters/${id}/init`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => {
+        if (!r.ok) return r.json().then((b: any) => { throw new Error(b.error ?? `HTTP ${r.status}`); });
+        return r.json();
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["projects"] });
     },
@@ -114,7 +120,10 @@ export function useSyncSkills() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      fetch(`${BASE}/skills/sync`, { method: "POST" }).then((r) => r.json()),
+      fetch(`${BASE}/skills/sync`, { method: "POST" }).then((r) => {
+        if (!r.ok) return r.json().then((b: any) => { throw new Error(b.error ?? `HTTP ${r.status}`); });
+        return r.json();
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["skills"] });
       qc.invalidateQueries({ queryKey: ["skillCheck"] });
