@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useProjects, useTeams, useHealth, useSkills, useDiff } from "../hooks/useApi";
-import { ProjectCard } from "../components/ProjectCard";
 import { AgentList } from "../components/AgentList";
 import { SkillTable } from "../components/SkillTable";
 import { HealthChecks } from "../components/HealthChecks";
@@ -11,6 +10,7 @@ import { VirtualOffice } from "../components/VirtualOffice";
 import { DiffView } from "../components/DiffView";
 import { ManifestForm } from "../components/ManifestForm";
 import { TeamGraph } from "../components/TeamGraph";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 const grid: React.CSSProperties = {
   display: "grid",
@@ -38,8 +38,6 @@ const select: React.CSSProperties = {
   padding: "6px 12px",
   fontSize: 13,
 };
-const wide: React.CSSProperties = { gridColumn: "span 2" };
-const full: React.CSSProperties = { gridColumn: "span 3" };
 
 export function Dashboard() {
   const projects = useProjects();
@@ -92,65 +90,92 @@ export function Dashboard() {
         </select>
       </div>
 
+      {/* Main grid — rows 1–2 */}
       <div style={grid}>
-        {/* Row 1 */}
-        <div style={{ ...section, ...wide }}>
-          {activeProject && <ProjectCard project={activeProject} />}
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Cost</h4>
-          <CostTracker />
-        </div>
-
-        {/* Row 2 */}
-        <div style={section}>
-          <h4 style={heading}>Teams & Agents</h4>
-          <AgentList teams={teamList} />
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Virtual Office</h4>
-          <VirtualOffice teams={teamList} />
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Health</h4>
-          <HealthChecks findings={health.data ?? []} />
-        </div>
-
-        {/* Row 3 */}
-        <div style={{ ...section, ...wide }}>
-          <h4 style={heading}>Skills</h4>
-          <SkillTable skills={skills.data ?? []} />
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Activity</h4>
-          <ActivityFeed />
-        </div>
-
-        {/* Row 4 - Kanban full width */}
-        {activeProject && (
-          <div style={{ ...section, ...full }}>
-            <h4 style={heading}>Kanban</h4>
-            <KanbanBoard projectId={activeProject.id} teamId={activeProject.entry_team} />
+        {/* Kanban: col 1, rows 1–2 */}
+        <ErrorBoundary name="Kanban">
+          <div style={{ ...section, gridRow: "span 2" }}>
+            <h4 style={heading}>Kanban Board</h4>
+            {activeProject ? (
+              <KanbanBoard projectId={activeProject.id} teamId={activeProject.entry_team} />
+            ) : (
+              <div style={{ color: "#8b949e" }}>No project selected.</div>
+            )}
           </div>
-        )}
+        </ErrorBoundary>
 
-        {/* Row 5 */}
-        <div style={section}>
-          <h4 style={heading}>Diff</h4>
-          <DiffView entries={diff.data ?? []} />
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Manifest</h4>
-          <ManifestForm />
-        </div>
-        <div style={section}>
-          <h4 style={heading}>Team Graph</h4>
-          {teamList.length > 0 ? (
-            <TeamGraph team={teamList[0]} />
-          ) : (
-            <div style={{ color: "#8b949e" }}>No team data.</div>
-          )}
-        </div>
+        {/* Row 1 col 2: Agents */}
+        <ErrorBoundary name="Agents">
+          <div style={section}>
+            <h4 style={heading}>Agents</h4>
+            <AgentList teams={teamList} />
+          </div>
+        </ErrorBoundary>
+
+        {/* Row 1 col 3: Cost */}
+        <ErrorBoundary name="Cost">
+          <div style={section}>
+            <h4 style={heading}>Cost</h4>
+            <CostTracker />
+          </div>
+        </ErrorBoundary>
+
+        {/* Row 2 col 2: Skills */}
+        <ErrorBoundary name="Skills">
+          <div style={section}>
+            <h4 style={heading}>Skills</h4>
+            <SkillTable skills={skills.data ?? []} />
+          </div>
+        </ErrorBoundary>
+
+        {/* Row 2 col 3: Health */}
+        <ErrorBoundary name="Health">
+          <div style={section}>
+            <h4 style={heading}>Health</h4>
+            <HealthChecks findings={health.data ?? []} />
+          </div>
+        </ErrorBoundary>
+
+        {/* Row 3: Virtual Office cols 1–2, Activity col 3 */}
+        <ErrorBoundary name="VirtualOffice">
+          <div style={{ ...section, gridColumn: "span 2" }}>
+            <h4 style={heading}>Virtual Office</h4>
+            <VirtualOffice teams={teamList} />
+          </div>
+        </ErrorBoundary>
+
+        <ErrorBoundary name="Activity">
+          <div style={section}>
+            <h4 style={heading}>Activity</h4>
+            <ActivityFeed />
+          </div>
+        </ErrorBoundary>
+
+        {/* Row 4: Diff, Manifest, TeamGraph */}
+        <ErrorBoundary name="Diff">
+          <div style={section}>
+            <h4 style={heading}>Diff</h4>
+            <DiffView entries={diff.data ?? []} />
+          </div>
+        </ErrorBoundary>
+
+        <ErrorBoundary name="Manifest">
+          <div style={section}>
+            <h4 style={heading}>Manifest</h4>
+            <ManifestForm />
+          </div>
+        </ErrorBoundary>
+
+        <ErrorBoundary name="TeamGraph">
+          <div style={section}>
+            <h4 style={heading}>Team Graph</h4>
+            {teamList.length > 0 ? (
+              <TeamGraph team={teamList[0]} />
+            ) : (
+              <div style={{ color: "#8b949e" }}>No team data.</div>
+            )}
+          </div>
+        </ErrorBoundary>
       </div>
     </div>
   );
