@@ -6,6 +6,14 @@ import { addClient } from "./ws.js";
 import { startWatcher, stopWatcher } from "./watcher.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import projectRoutes from "./routes/projects.js";
+import agentRoutes from "./routes/agents.js";
+import teamRoutes from "./routes/teams.js";
+import skillRoutes from "./routes/skills.js";
+import healthRoutes from "./routes/health.js";
+import starterRoutes from "./routes/starters.js";
+import manifestRoutes from "./routes/manifest.js";
+import diffRoutes from "./routes/diff.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +63,16 @@ export async function createServer(opts: { host?: string; port?: number } = {}) 
 
   // Health endpoint
   app.get("/api/ping", async () => ({ status: "ok" }));
+
+  // API routes
+  await app.register(projectRoutes);
+  await app.register(agentRoutes);
+  await app.register(teamRoutes);
+  await app.register(skillRoutes);
+  await app.register(healthRoutes);
+  await app.register(starterRoutes);
+  await app.register(manifestRoutes);
+  await app.register(diffRoutes);
 
   // Graceful shutdown
   const shutdown = async () => {
