@@ -52,6 +52,22 @@ openclaw-store/
 ├── skills/
 │   └── openclaw-store-manager/ ← The manager skill installed into OpenClaw itself
 ├── partials/               ← Shared Markdown fragments used by the renderer
+├── dashboard/              ← Web dashboard (Fastify server + React SPA)
+│   ├── server/             ← Fastify server, REST routes, WebSocket, file watcher
+│   │   ├── index.ts        ← Server entry: Fastify + WS + CORS + SPA fallback
+│   │   ├── ws.ts           ← WebSocket client registry and broadcast
+│   │   ├── watcher.ts      ← chokidar file watcher → WS event broadcast
+│   │   ├── services/store.ts ← Service bridge wrapping src/lib/ imports
+│   │   └── routes/         ← One file per resource (projects, agents, teams, skills, etc.)
+│   ├── src/                ← React 19 SPA
+│   │   ├── hooks/useApi.ts ← TanStack Query hooks for all API endpoints
+│   │   ├── hooks/useWs.ts  ← WebSocket auto-reconnect + query invalidation
+│   │   ├── components/     ← 11 panel components (AgentList, SkillTable, KanbanBoard, etc.)
+│   │   ├── pages/          ← Dashboard, Projects, Starters, Config
+│   │   └── lib/types.ts    ← Frontend TypeScript types
+│   ├── package.json        ← Separate deps: fastify, react, @tanstack/react-query, vite
+│   ├── tsconfig.server.json ← Server config with project reference to root
+│   └── tsconfig.json       ← Frontend config (moduleResolution: bundler)
 ├── scripts/                ← Code generation scripts (e.g. generate-starters-from-usecases.mjs)
 ├── tests/                  ← Vitest test suite
 └── dist/                   ← Compiled output (gitignored in practice, do not edit)
@@ -184,6 +200,24 @@ openclaw-store validate  # validate all bundled templates against Zod schemas
 
 Always run `npm run build` before testing CLI behavior. The CLI runs from `dist/`, not `src/`.
 
+### Dashboard Development
+
+```bash
+cd dashboard
+npm install          # dashboard deps (separate from root)
+npm test             # vitest run (dashboard server tests)
+
+# Dev mode (two terminals):
+npx tsx server/index.ts        # Fastify server on :3456
+npx vite                       # Vite dev server on :5173 (proxies /api → :3456)
+
+# Production build:
+npx vite build                 # React → dashboard/dist/client/
+npx tsc -p tsconfig.server.json  # Server → dashboard/dist/server/
+```
+
+The dashboard server imports from `../../dist/lib/` (the root project's compiled output), so always run `npm run build` in the root first.
+
 ---
 
 ## Testing
@@ -207,6 +241,17 @@ Test files and what they cover:
 | `workflow-mode.test.ts` | Mode detection (managed / Claude Code / OpenClaw / unconfigured) |
 | `openclaw-agents.test.ts` | Native OpenClaw agent discovery |
 | `openclaw-skills.test.ts` | Native OpenClaw skill discovery |
+| `doctor.test.ts` | `runChecks()` findings, severity levels, side-effect-free verification |
+| `diff-lib.test.ts` | `computeDiff()` — added/removed/changed entries |
+| `install-headless.test.ts` | `runHeadlessInstall()` dryRun, onProgress, projectId |
+| `skill-ops.test.ts` | `checkSkills()` and `syncSkills()` return shapes |
+| `starter-ops.test.ts` | `initStarter()`, `suggestStarters()`, helper functions |
+
+Dashboard tests live in `dashboard/server/__tests__/`:
+
+| File | What it tests |
+|---|---|
+| `routes.test.ts` | All 8 REST route groups via Fastify inject() |
 
 Test fixtures are in `tests/fixtures/`. Use env var overrides to point tests at fixtures instead of real system state.
 
@@ -256,6 +301,8 @@ Run `openclaw-store validate` after adding any template to confirm the YAML is s
 - **Skill placement is not automatic.** A skill must appear in the agent template's `skills:` list OR be targeted via `targets.agents` / `targets.teams` in the manifest. OpenClaw does not auto-install missing skills.
 - **Shared memory files use file paths, not OpenClaw memory search.** The `kanban.md`, `tasks-log.md`, etc. are coordination files accessed by direct path. They are NOT indexed by OpenClaw's `memory_search` tool.
 - **Node.js ≥ 22 required.** Set in `package.json` `engines` field.
+- **Dashboard has its own `package.json`.** The `dashboard/` directory is a separate npm project with its own dependencies. It imports from `../../dist/lib/` via the store service bridge at `dashboard/server/services/store.ts`. Always build the root project first (`npm run build`) before running the dashboard.
+- **Dashboard server uses TypeScript project references.** `dashboard/tsconfig.server.json` has `"references": [{ "path": ".." }]` pointing to the root tsconfig. This enables type-safe imports from `dist/lib/` with proper declaration files.
 
 ---
 
@@ -283,3 +330,31 @@ When there is no manifest, `openclaw-store install` runs `runZeroConfigInstall()
 | `~/.openclaw-store/runtime.json` | home | no | Global registry of installed projects |
 | `~/.openclaw-store/workspaces/` | home | no | Agent workspace files (SOUL.md, TOOLS.md, etc.) |
 | `~/.openclaw/openclaw.json` | home | no | Patched by install — agent list, allowlists |
+
+## Dashboard Architecture
+
+The web dashboard lives in `dashboard/` and provides a visual interface to all store management operations.
+
+**Server stack:** Fastify + @fastify/websocket + chokidar
+**Client stack:** React 19 + TanStack Query v5 + Vite + react-router-dom v7
+
+```
+Browser ←→ Fastify (:3456)
+              ├── REST /api/* → services/store.ts → dist/lib/*.js
+              ├── WS /ws → broadcast file-change events
+              └── Static files (production) or Vite proxy (dev)
+
+chokidar watches:
+  ~/.openclaw-store/runtime.json
+  ~/.openclaw-store/skills-index.json
+  <project>/openclaw-store.yaml
+  <project>/openclaw-store.lock
+  <project>/shared/memory/*.md
+```
+
+**Key patterns:**
+- REST for data fetching, WebSocket for "something changed" notifications
+- WebSocket events trigger React Query invalidation (not data transfer)
+- Store service bridge (`dashboard/server/services/store.ts`) wraps all `src/lib/` imports
+- Install mutex prevents concurrent installs via the manifest route
+- SPA fallback in production (non-API routes serve `index.html`)

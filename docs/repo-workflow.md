@@ -378,7 +378,21 @@ The intended flow for `openclaw-store-manager` is:
 
 If no starter is a clean fit, use `default-managed` or the closest starter as scaffolding and modify the generated packs, skills, and targets.
 
-## 13. Typical workflow summary
+## 13. Use the web dashboard
+
+For a visual overview of projects, agents, skills, and health:
+
+```bash
+openclaw-store dashboard
+```
+
+Opens http://localhost:3456 with four tabs: Overview, Projects, Starters, and Config.
+
+The dashboard watches your project files and pushes real-time updates via WebSocket. You can browse starters and init projects directly from the UI.
+
+For remote access options, see [docs/remote-access.md](./remote-access.md).
+
+## 14. Typical workflow summary
 
 ```bash
 # one-time setup in this repo
@@ -394,6 +408,9 @@ openclaw-store starter init podcast-production-pipeline ./my-project
 cd my-project
 openclaw-store install
 openclaw-store doctor
+
+# visual management
+openclaw-store dashboard
 
 # inspect installed projects and available teams
 openclaw-store project list

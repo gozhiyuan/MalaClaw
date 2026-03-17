@@ -20,6 +20,18 @@ This document explains the technical architecture: data flow, file formats, the 
 | Manager skill project init | `openclaw-store-manager` guides users through missing skills conversationally — detect, explain, guide |
 | `requires.bins` field | Skill templates now declare required system binaries before `env:` under `requires:` |
 
+### Web Dashboard
+
+| Feature | Description |
+|---|---|
+| `dashboard` command | Start a Fastify + React web UI on port 3456 |
+| Overview page | Project selector, agent list, skill table, health checks, kanban, virtual office, cost tracker, activity feed |
+| Projects page | Expandable project list with team graphs and agent details |
+| Starters page | Searchable starter grid with one-click project initialization |
+| Config page | Manifest viewer, diff preview, and install trigger |
+| WebSocket events | Real-time file change notifications via chokidar file watcher |
+| Remote access | Cloudflare Tunnel, Tailscale, or SSH tunnel (see `docs/remote-access.md`) |
+
 ### Core Foundations
 
 | Feature | Description |
@@ -48,12 +60,15 @@ This document explains the technical architecture: data flow, file formats, the 
 │  │  skills/     │   │  install.ts  │   │  research-lab  │  │
 │  └──────────────┘   └──────┬───────┘   │  personal-asst │  │
 │                             │          │  automation-ops│  │
-│                             │          │  customer-svc  │  │
-│                             │          │  finance-ops   │  │
-│                             │          │  data-ops      │  │
-│                             │          │  37 demos      │  │
-│                             │          └────────────────┘  │
-│                            │                                │
+│                     ┌───────┤          │  customer-svc  │  │
+│                     │       │          │  finance-ops   │  │
+│  ┌──────────────────▼──┐    │          │  data-ops      │  │
+│  │    Dashboard        │    │          │  37 demos      │  │
+│  │  Fastify + React    │    │          └────────────────┘  │
+│  │  REST + WebSocket   │    │                               │
+│  │  File watcher       │    │                               │
+│  └──────────┬──────────┘   │                                │
+│             │               │                                │
 │              ┌─────────────▼──────────────┐                │
 │              │         Core Lib           │                │
 │              │  schema.ts  (Zod types)    │                │
@@ -1001,4 +1016,4 @@ openclaw-store install --dry-run           # preview only, no lockfile write
 | Claude Code adapter | `src/lib/adapters/claude-code.ts` — already stubbed |
 | Pack versioning + semver | `src/lib/resolver.ts` — extend `resolveManifest()` |
 | `openclaw-store update` | New command — re-resolve + diff lockfile |
-| Dashboard UI | `src/server/` — add a read-only web view over lockfile + memory files |
+| Dashboard UI | ✅ Done — `openclaw-store dashboard` starts a Fastify + React web UI |

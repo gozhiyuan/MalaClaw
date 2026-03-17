@@ -248,6 +248,9 @@ openclaw-store/
 ├── skills/
 │   └── openclaw-store-manager/
 ├── src/                   # CLI + install/runtime logic
+├── dashboard/             # web dashboard (Fastify server + React SPA)
+│   ├── server/            # Fastify routes, WebSocket, file watcher
+│   └── src/               # React components, pages, hooks
 └── docs/
 ```
 
@@ -373,6 +376,32 @@ There are two distinct layers:
 
 The shared team memory layer is orchestration state, not a replacement for OpenClaw memory. Agents should continue to use OpenClaw's native memory layer for their own workspace memory, while `openclaw-store` manages the extra team coordination files around it.
 
+## Web Dashboard
+
+`openclaw-store` includes a built-in web dashboard for visual management of projects, agents, teams, skills, and configuration.
+
+```bash
+openclaw-store dashboard
+```
+
+Opens at http://localhost:3456 with:
+
+- **Overview** — project selector, agent list, skill table, health checks, kanban board, virtual office, cost tracker, activity feed
+- **Projects** — expandable project list with team graphs, kanban, and agent details
+- **Starters** — searchable grid of starter cards with one-click init
+- **Config** — manifest viewer, diff preview, and install trigger
+
+The dashboard uses a Fastify server with WebSocket for real-time file change notifications. All data comes from the existing YAML/JSON files — no database.
+
+Options:
+
+```bash
+openclaw-store dashboard --port 8080    # custom port
+openclaw-store dashboard --host 127.0.0.1  # localhost only
+```
+
+For remote access (Cloudflare Tunnel, Tailscale, SSH), see [docs/remote-access.md](./docs/remote-access.md).
+
 ## Useful Commands
 
 ```bash
@@ -399,10 +428,11 @@ openclaw-store skill show <id>
 openclaw-store skill sync
 openclaw-store skill check
 
-# health
+# health + dashboard
 openclaw-store diff
 openclaw-store validate
 openclaw-store doctor
+openclaw-store dashboard
 ```
 
 ## More Detail
