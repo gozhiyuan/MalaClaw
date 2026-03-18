@@ -64,7 +64,7 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   // Static files in production
   if (!isDev) {
     await app.register(fastifyStatic, {
-      root: path.join(__dirname, "../client"),
+      root: path.join(__dirname, "../dist/client"),
       wildcard: false,
     });
     // SPA fallback (only for non-API routes)
