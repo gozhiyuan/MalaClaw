@@ -69,6 +69,7 @@ export async function runInit(projectDir?: string): Promise<void> {
 
   const manifest = {
     version: 1 as const,
+    runtime: "openclaw" as const,
     project: {
       id: project.id,
       name: project.name,

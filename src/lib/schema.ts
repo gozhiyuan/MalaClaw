@@ -258,8 +258,12 @@ export const ManifestSkillRef = z.object({
   }).optional(),
 });
 
+export const RuntimeTarget = z.enum(["openclaw", "claude-code", "codex", "clawteam"]);
+export type RuntimeTarget = z.infer<typeof RuntimeTarget>;
+
 export const Manifest = z.object({
   version: z.number().default(1),
+  runtime: RuntimeTarget.default("openclaw"),
   project: ManifestProject.optional(),
   packs: z.array(ManifestPackRef).optional().default([]),
   skills: z.array(ManifestSkillRef).optional().default([]),
@@ -383,3 +387,20 @@ export const SkillInventory = z.object({
 
 export type DiscoveredSkill = z.infer<typeof DiscoveredSkill>;
 export type SkillInventory = z.infer<typeof SkillInventory>;
+
+/* ── Runtime & Telemetry ─────────────────────────────── */
+
+export const AgentTelemetry = z.object({
+  agentId: z.string(),
+  runtime: RuntimeTarget,
+  status: z.enum(["idle", "working", "error", "offline"]),
+  detail: z.string().optional(),
+  updatedAt: z.string(),               // ISO 8601
+  sessionId: z.string().optional(),
+  pid: z.number().optional(),
+  workspaceDir: z.string().optional(),
+  lastHeartbeatAt: z.string().optional(), // ISO 8601
+  ttlSeconds: z.number().default(300),
+  source: z.enum(["gateway", "clawteam", "heartbeat", "manual"]).default("manual"),
+});
+export type AgentTelemetry = z.infer<typeof AgentTelemetry>;

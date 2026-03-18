@@ -120,7 +120,7 @@ export async function runHeadlessInstall(opts: InstallOpts): Promise<InstallResu
 
   let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; packs: { id: string }[]; skills: never[] };
   if (opts.pack) {
-    manifest = { version: 1, packs: [{ id: opts.pack }], skills: [] };
+    manifest = { version: 1, runtime: "openclaw" as const, packs: [{ id: opts.pack }], skills: [] };
   } else {
     manifest = await loadManifest(opts.projectDir);
   }

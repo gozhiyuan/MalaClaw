@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
-import { AgentDef, TeamDef, SkillEntry, PackDef, TopologyType, CommunicationConfig } from "../src/lib/schema.js";
+import { AgentDef, TeamDef, SkillEntry, PackDef, TopologyType, CommunicationConfig, RuntimeTarget, AgentTelemetry, Manifest } from "../src/lib/schema.js";
 import { TEMPLATES_DIR, PACKS_DIR } from "./helpers/fixtures.js";
 
 async function listYamls(dir: string): Promise<string[]> {
@@ -93,5 +93,76 @@ describe("PackDef schema", () => {
       const raw = parse(await fs.readFile(f, "utf-8"));
       expect(() => PackDef.parse(raw), `${path.basename(f)} failed`).not.toThrow();
     }
+  });
+});
+
+describe("RuntimeTarget enum", () => {
+  it("accepts valid runtime targets", () => {
+    expect(RuntimeTarget.parse("openclaw")).toBe("openclaw");
+    expect(RuntimeTarget.parse("claude-code")).toBe("claude-code");
+    expect(RuntimeTarget.parse("codex")).toBe("codex");
+    expect(RuntimeTarget.parse("clawteam")).toBe("clawteam");
+  });
+
+  it("rejects unknown runtime targets", () => {
+    expect(() => RuntimeTarget.parse("unknown")).toThrow();
+  });
+});
+
+describe("AgentTelemetry schema", () => {
+  it("parses minimal entry with defaults", () => {
+    const entry = AgentTelemetry.parse({
+      agentId: "store__proj__team__agent",
+      runtime: "openclaw",
+      status: "idle",
+      updatedAt: "2026-03-18T00:00:00Z",
+    });
+    expect(entry.ttlSeconds).toBe(300);
+    expect(entry.source).toBe("manual");
+  });
+
+  it("parses full entry with clawteam source", () => {
+    const entry = AgentTelemetry.parse({
+      agentId: "store__proj__team__agent",
+      runtime: "clawteam",
+      status: "working",
+      detail: "Running task",
+      updatedAt: "2026-03-18T00:00:00Z",
+      sessionId: "sess-123",
+      pid: 42,
+      workspaceDir: "/tmp/workspace",
+      lastHeartbeatAt: "2026-03-18T00:00:05Z",
+      ttlSeconds: 600,
+      source: "clawteam",
+    });
+    expect(entry.runtime).toBe("clawteam");
+    expect(entry.source).toBe("clawteam");
+    expect(entry.ttlSeconds).toBe(600);
+    expect(entry.pid).toBe(42);
+  });
+
+  it("rejects invalid status", () => {
+    expect(() => AgentTelemetry.parse({
+      agentId: "a",
+      runtime: "openclaw",
+      status: "unknown",
+      updatedAt: "2026-03-18T00:00:00Z",
+    })).toThrow();
+  });
+});
+
+describe("Manifest runtime field", () => {
+  it("defaults to openclaw when runtime is omitted", () => {
+    const manifest = Manifest.parse({ version: 1 });
+    expect(manifest.runtime).toBe("openclaw");
+  });
+
+  it("accepts explicit runtime value", () => {
+    const manifest = Manifest.parse({ version: 1, runtime: "claude-code" });
+    expect(manifest.runtime).toBe("claude-code");
+  });
+
+  it("rejects invalid runtime value", () => {
+    expect(() => Manifest.parse({ version: 1, runtime: "invalid" })).toThrow();
   });
 });

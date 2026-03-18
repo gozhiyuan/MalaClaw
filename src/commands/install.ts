@@ -28,10 +28,10 @@ export { finalizeLockfileSkills, shouldInstallSkillForAgent, buildRuntimeProject
 export async function runInstall(opts: InstallOptions = {}): Promise<void> {
   // The dryRun path needs resolved pack data for printDryRun, so we handle it before headless
   if (opts.dryRun) {
-    let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; packs: { id: string }[]; skills: never[] };
+    let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; runtime: "openclaw"; packs: { id: string }[]; skills: never[] };
     try {
       manifest = opts.pack
-        ? { version: 1, packs: [{ id: opts.pack }], skills: [] }
+        ? { version: 1, runtime: "openclaw" as const, packs: [{ id: opts.pack }], skills: [] }
         : await loadManifest(opts.projectDir);
     } catch (err) {
       if (!opts.pack && isManifestNotFoundError(err)) {

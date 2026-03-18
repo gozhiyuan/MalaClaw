@@ -64,6 +64,7 @@ export function buildStarterManifest(starter: StarterDef, targetDir: string) {
 
   return {
     version: 1 as const,
+    runtime: "openclaw" as const,
     project: {
       id: projectId,
       name: projectName,
