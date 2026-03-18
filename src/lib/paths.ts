@@ -153,3 +153,18 @@ export function resolveOpenClawAgentDir(projectId: string, teamId: string, agent
 export function resolveAgentId(projectId: string, teamId: string, agentId: string): string {
   return `store__${projectId}__${teamId}__${agentId}`;
 }
+
+/** Root dir for per-agent telemetry state files: ~/.malaclaw/agents/ */
+export function resolveAgentTelemetryDir(): string {
+  return path.join(resolveStoreRoot(), "agents");
+}
+
+/** Telemetry state file for one agent: ~/.malaclaw/agents/<agentId>/state.json */
+export function resolveAgentTelemetryFile(agentId: string): string {
+  return path.join(resolveAgentTelemetryDir(), agentId, "state.json");
+}
+
+/** ClawTeam data directory: ~/.clawteam/ (respects CLAWTEAM_DATA_DIR env var) */
+export function resolveClawTeamDataDir(): string {
+  return process.env.CLAWTEAM_DATA_DIR || path.join(os.homedir(), ".clawteam");
+}
