@@ -1,7 +1,6 @@
 import { loadManifest, writeLockfile } from "./loader.js";
 import { resolveManifest, type ResolvedPack } from "./resolver.js";
 import {
-  installTeam,
   updateStoreGuidance,
   readOpenClawConfig,
   writeOpenClawConfig,
@@ -120,7 +119,7 @@ export function buildRuntimeProject(
 export async function runHeadlessInstall(opts: InstallOpts): Promise<InstallResult> {
   const errors: string[] = [];
 
-  let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; packs: { id: string }[]; skills: never[] };
+  let manifest: Awaited<ReturnType<typeof loadManifest>>;
   if (opts.pack) {
     manifest = { version: 1, runtime: "openclaw" as const, packs: [{ id: opts.pack }], skills: [] };
   } else {
@@ -195,18 +194,16 @@ export async function runHeadlessInstall(opts: InstallOpts): Promise<InstallResu
       total: totalPacks,
     });
 
-    const agentsWithMembers = await Promise.all(
-      resolved.agents.map(async (a) => {
-        const member = resolved.teamDef.members.find((m) => m.agent === a.agentDef.id)!;
-        workspaceDirToAgentId.set(a.workspaceDir, a.agentId);
-        return {
-          agentDef: a.agentDef,
-          member,
-          workspaceDir: a.workspaceDir,
-          agentDir: a.agentDir,
-        };
-      }),
-    );
+    const agentsWithMembers = resolved.agents.map((a) => {
+      const member = resolved.teamDef.members.find((m) => m.agent === a.agentDef.id)!;
+      workspaceDirToAgentId.set(a.workspaceDir, a.agentId);
+      return {
+        agentDef: a.agentDef,
+        member,
+        workspaceDir: a.workspaceDir,
+        agentDir: a.agentDir,
+      };
+    });
 
     await provisioner.installTeam({
       projectId: project.id,

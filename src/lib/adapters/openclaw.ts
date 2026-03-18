@@ -18,9 +18,8 @@ import {
   resolveAgentId,
 } from "../paths.js";
 import { renderBootstrapFiles } from "../renderer.js";
-import type { AgentDef, TeamDef, TeamMember } from "../schema.js";
-import type { RuntimeProvisioner, RuntimeObserver, InstallTeamParams as BaseInstallTeamParams, InstallAction as BaseInstallAction } from "./base.js";
-import type { AgentTelemetry } from "../schema.js";
+import type { AgentDef, AgentTelemetry, TeamDef, TeamMember } from "../schema.js";
+import type { RuntimeProvisioner, RuntimeObserver, InstallTeamParams, InstallAction } from "./base.js";
 import { readAllAgentTelemetry } from "../telemetry.js";
 
 // ── openclaw.json read/write ─────────────────────────────────────────────────
@@ -51,7 +50,6 @@ export async function readOpenClawConfig(): Promise<{ path: string; config: Open
   } catch (err) {
     const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
     if (isNotFound) {
-      const configPath = resolveOpenClawConfigPath();
       throw new Error(
         `OpenClaw config not found at ${configPath}.\n` +
         `Install OpenClaw first, then run: malaclaw install`,
@@ -265,11 +263,15 @@ async function readFileOrEmpty(filePath: string): Promise<string> {
   }
 }
 
+function resolveMainWorkspaceDir(config: OpenClawConfig): string {
+  const defaults = config.agents?.defaults as Record<string, unknown> | undefined;
+  return (typeof defaults?.workspace === "string" ? defaults.workspace : null)
+    ?? resolveMainAgentWorkspaceDir();
+}
+
 export async function updateStoreGuidance(): Promise<void> {
   const { config } = await readOpenClawConfig();
-  const workspaceDir =
-    (config.agents?.defaults as Record<string, unknown> | undefined)?.workspace as string | undefined
-    ?? resolveMainAgentWorkspaceDir();
+  const workspaceDir = resolveMainWorkspaceDir(config);
 
   const toolsPath = path.join(workspaceDir, "TOOLS.md");
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
@@ -281,9 +283,7 @@ export async function updateStoreGuidance(): Promise<void> {
 
 export async function removeStoreGuidance(): Promise<void> {
   const { config } = await readOpenClawConfig();
-  const workspaceDir =
-    (config.agents?.defaults as Record<string, unknown> | undefined)?.workspace as string | undefined
-    ?? resolveMainAgentWorkspaceDir();
+  const workspaceDir = resolveMainWorkspaceDir(config);
 
   const toolsPath = path.join(workspaceDir, "TOOLS.md");
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
@@ -335,19 +335,7 @@ export async function provisionAgent(params: ProvisionParams): Promise<void> {
 
 // ── Full install for a team ──────────────────────────────────────────────────
 
-export type InstallTeamParams = {
-  projectId: string;
-  teamDef: TeamDef;
-  agents: { agentDef: AgentDef; member: TeamMember; workspaceDir: string; agentDir: string }[];
-  overwrite?: boolean;
-  dryRun?: boolean;
-};
-
-export type InstallAction = {
-  type: "create_workspace" | "write_file" | "patch_config" | "update_guidance" | "create_agent_dir";
-  path: string;
-  description: string;
-};
+export type { InstallTeamParams, InstallAction };
 
 export async function installTeam(params: InstallTeamParams): Promise<void> {
   if (params.dryRun) {
@@ -491,16 +479,16 @@ export async function uninstallTeam(
 export class OpenClawProvisioner implements RuntimeProvisioner {
   readonly runtime = "openclaw" as const;
 
-  async installTeam(params: BaseInstallTeamParams): Promise<void> {
-    return installTeam(params as unknown as InstallTeamParams);
+  async installTeam(params: InstallTeamParams): Promise<void> {
+    return installTeam(params);
   }
 
   async uninstallTeam(projectId: string, teamId: string, workspaceRoot: string, agentIds?: string[]): Promise<void> {
     return uninstallTeam(projectId, teamId, workspaceRoot, agentIds);
   }
 
-  async planInstallTeam(params: BaseInstallTeamParams): Promise<BaseInstallAction[]> {
-    return planInstallTeam(params as unknown as InstallTeamParams);
+  async planInstallTeam(params: InstallTeamParams): Promise<InstallAction[]> {
+    return planInstallTeam(params);
   }
 }
 

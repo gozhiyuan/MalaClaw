@@ -5,7 +5,7 @@ const program = new Command();
 
 program
   .name("malaclaw")
-  .description("Starter packs, agent templates, and installer for OpenClaw")
+  .description("Runtime-agnostic agent team templates and installer")
   .version("1.0.0");
 
 // ── init ─────────────────────────────────────────────────────────────────────
@@ -66,10 +66,9 @@ program
   .option("--pack <id>", "Uninstall a specific pack")
   .option("--all", "Uninstall all installed packs")
   .action(async (opts) => {
-    const { uninstallTeam, removeStoreGuidance } = await import(
-      "./lib/adapters/openclaw.js"
-    );
-    const { loadLockfile } = await import("./lib/loader.js");
+    const { removeStoreGuidance } = await import("./lib/adapters/openclaw.js");
+    const { getProvisioner } = await import("./lib/adapters/registry.js");
+    const { loadLockfile, loadManifest } = await import("./lib/loader.js");
     const { resolveStoreWorkspacesRoot } = await import("./lib/paths.js");
     const { projectMetaFromLockfile } = await import("./lib/project-meta.js");
     const { removeRuntimeProject } = await import("./lib/runtime.js");
@@ -80,6 +79,14 @@ program
       console.log("Nothing to uninstall (no lockfile found).");
       return;
     }
+
+    // Detect runtime from manifest (fall back to openclaw)
+    let runtime: "openclaw" | "claude-code" | "codex" | "clawteam" = "openclaw";
+    try {
+      const manifest = await loadManifest();
+      runtime = manifest.runtime ?? "openclaw";
+    } catch { /* no manifest, default to openclaw */ }
+    const provisioner = getProvisioner(runtime);
 
     const packs = lockfile.packs ?? [];
     const project = projectMetaFromLockfile(lockfile);
@@ -110,14 +117,13 @@ program
     }
 
     for (const pack of toRemove) {
-      // pack.id is "packId__teamId" — derive workspace root from first agent if available
       const firstAgentWorkspace = pack.agents[0]?.workspace;
       const workspaceRoot = firstAgentWorkspace
-        ? path.dirname(firstAgentWorkspace)  // parent of agent workspace = team workspace root
+        ? path.dirname(firstAgentWorkspace)
         : path.join(resolveStoreWorkspacesRoot(), deriveTeamId(pack));
       const teamId = deriveTeamId(pack);
       console.log(`Uninstalling pack: ${pack.id}...`);
-      await uninstallTeam(project.id, teamId, workspaceRoot, pack.agents.map((a) => a.id));
+      await provisioner.uninstallTeam(project.id, teamId, workspaceRoot, pack.agents.map((a) => a.id));
       console.log(`✓ Uninstalled ${pack.id}`);
     }
 
@@ -126,7 +132,7 @@ program
       console.log(`✓ Removed project registry entry: ${project.id}`);
     }
 
-    if (opts.all) {
+    if (opts.all && runtime === "openclaw") {
       await removeStoreGuidance();
       console.log("✓ Removed store guidance from main agent workspace.");
     }

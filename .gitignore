@@ -3,6 +3,7 @@ dist/
 *.js.map
 .DS_Store
 .worktrees/
+.superpowers/
 
 # Dashboard
 dashboard/dist/

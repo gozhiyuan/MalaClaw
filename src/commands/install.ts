@@ -1,10 +1,8 @@
 import { loadManifest, loadSkill } from "../lib/loader.js";
 import { resolveManifest, type ResolvedPack } from "../lib/resolver.js";
-import {
-  planInstallTeam,
-  updateStoreGuidance,
-  type InstallAction,
-} from "../lib/adapters/openclaw.js";
+import { updateStoreGuidance } from "../lib/adapters/openclaw.js";
+import type { InstallAction } from "../lib/adapters/base.js";
+import { getProvisioner } from "../lib/adapters/registry.js";
 import { resolveMainAgentWorkspaceDir } from "../lib/paths.js";
 import path from "node:path";
 import {
@@ -14,6 +12,7 @@ import {
   buildRuntimeProject,
   type InstallOpts,
 } from "../lib/install-headless.js";
+import type { RuntimeTarget } from "../lib/schema.js";
 
 export type InstallOptions = {
   dryRun?: boolean;
@@ -28,7 +27,7 @@ export { finalizeLockfileSkills, shouldInstallSkillForAgent, buildRuntimeProject
 export async function runInstall(opts: InstallOptions = {}): Promise<void> {
   // The dryRun path needs resolved pack data for printDryRun, so we handle it before headless
   if (opts.dryRun) {
-    let manifest: Awaited<ReturnType<typeof loadManifest>> | { version: 1; runtime: "openclaw"; packs: { id: string }[]; skills: never[] };
+    let manifest: Awaited<ReturnType<typeof loadManifest>>;
     try {
       manifest = opts.pack
         ? { version: 1, runtime: "openclaw" as const, packs: [{ id: opts.pack }], skills: [] }
@@ -43,11 +42,12 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
     const { project, packs, skills } = await resolveManifest(manifest, {
       projectDir: opts.projectDir,
     });
+    const runtime = (manifest.runtime ?? "openclaw") as RuntimeTarget;
     if (packs.length === 0 && skills.length === 0) {
       console.log("Nothing to install.");
       return;
     }
-    printDryRun(project.id, packs);
+    await printDryRun(project.id, packs, runtime);
     printSkillStatus(skills.map((s) => ({
       id: s.skillDef.id,
       status: s.status,
@@ -62,8 +62,6 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
       onProgress: (p) => {
         if (p.phase === "installing" || p.phase === "finalizing" || p.phase === "resolving") {
           console.log(p.message);
-        } else if (p.phase === "skills") {
-          // skill progress is already logged inline; suppress duplicates
         }
       },
     } as InstallOpts);
@@ -72,10 +70,6 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
     const activeSkills = result.skillStatuses.filter((s) => s.status === "active");
     const inactiveSkills = result.skillStatuses.filter((s) => s.status === "inactive");
     const failedSkills = result.skillStatuses.filter((s) => s.status === "failed");
-
-    if (result.packsInstalled.length === 0 && result.skillStatuses.length === 0) {
-      // nothing happened — message already emitted via onProgress
-    }
 
     if (activeSkills.length > 0) {
       console.log(`\nSkills activated: ${activeSkills.map((s) => s.id).join(", ")}`);
@@ -101,8 +95,9 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
   }
 }
 
-function printDryRun(projectId: string, packs: ResolvedPack[]): void {
-  console.log("\n[DRY RUN] Actions that would be performed:\n");
+async function printDryRun(projectId: string, packs: ResolvedPack[], runtime: RuntimeTarget): Promise<void> {
+  const provisioner = getProvisioner(runtime);
+  console.log(`\n[DRY RUN] Actions that would be performed (runtime: ${runtime}):\n`);
   for (const resolved of packs) {
     console.log(`Pack: ${resolved.packId} (v${resolved.version})`);
     const agentsWithMembers = resolved.agents.map((a) => ({
@@ -111,7 +106,7 @@ function printDryRun(projectId: string, packs: ResolvedPack[]): void {
       workspaceDir: a.workspaceDir,
       agentDir: a.agentDir,
     }));
-    const actions: InstallAction[] = planInstallTeam({
+    const actions: InstallAction[] = await provisioner.planInstallTeam({
       projectId,
       teamDef: resolved.teamDef,
       agents: agentsWithMembers,

@@ -1,15 +1,35 @@
 {
   "name": "malaclaw",
   "version": "1.0.0",
-  "description": "Starter packs, agent templates, and CLI installer for OpenClaw",
+  "description": "Runtime-agnostic agent team templates and CLI installer for multi-agent projects",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "author": "gozhiyuan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gozhiyuan/MalaClaw.git"
+  },
+  "homepage": "https://github.com/gozhiyuan/MalaClaw#readme",
+  "bugs": {
+    "url": "https://github.com/gozhiyuan/MalaClaw/issues"
+  },
   "engines": {
     "node": ">=22"
   },
   "bin": {
     "malaclaw": "dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "templates/",
+    "packs/",
+    "starters/",
+    "demo-projects/",
+    "partials/",
+    "skills/",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "dev": "tsc -p tsconfig.json --watch",
