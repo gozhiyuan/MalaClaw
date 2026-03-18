@@ -9,4 +9,6 @@ dashboard/dist/
 dashboard/node_modules/
 dashboard/server/**/*.js
 dashboard/server/**/*.d.ts
+dashboard/test-results/
+dashboard/playwright-report/
 *.tsbuildinfo
