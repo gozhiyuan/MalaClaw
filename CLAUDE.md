@@ -387,3 +387,5 @@ chokidar watches:
 - Token-based auth middleware (optional `--auth-token` flag) protects API routes
 - ErrorBoundary isolates component failures to individual panels
 - SPA fallback in production (non-API routes serve `index.html`)
+
+**TODO:** Document the OpenClaw Gateway protocol (WebSocket message format, event types, connection lifecycle) — the dashboard GatewayClient at `dashboard/server/services/gateway.ts` implements the client side but the Gateway wire protocol is not yet documented.
