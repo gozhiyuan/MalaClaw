@@ -1,4 +1,5 @@
 import type { AgentDef, TeamDef, TeamMember, SharedMemoryFile } from "./schema.js";
+import { resolveTopology, getTopologyDescription, getTopologyGuidance } from "./topology.js";
 
 export type RenderContext = {
   agent: AgentDef;
@@ -177,6 +178,16 @@ export function renderAgentsFile(
       lines.push(`- **${name}** (\`${d}\`)`);
     }
   }
+
+  // Topology coordination guidance
+  const topology = resolveTopology(team);
+  lines.push("", "## Communication Topology", "");
+  lines.push(`This team uses **${topology}** topology.`);
+  lines.push("");
+  lines.push(getTopologyDescription(topology));
+  lines.push("");
+  lines.push("**Your coordination rules:**");
+  lines.push(...getTopologyGuidance(topology, role));
 
   if (sharedMemory && sharedMemory.files.length > 0) {
     lines.push("", "## Shared Memory", "");

@@ -108,4 +108,40 @@ describe("renderAgentsFile", () => {
     );
     expect(agentsFile).toContain("read only");
   });
+
+  it("includes Communication Topology section", () => {
+    const agent = makeAgent();
+    const team = makeTeam();
+    const allMembers = [
+      { member: { agent: "test-lead", role: "lead" as const, entry_point: true }, agent },
+    ];
+    const result = renderAgentsFile(
+      { agent, team, member: { agent: "test-lead", role: "lead", entry_point: true } },
+      allMembers,
+    );
+    expect(result).toContain("## Communication Topology");
+    expect(result).toContain("star");
+  });
+
+  it("renders lead-reviewer topology when declared", () => {
+    const agent = makeAgent();
+    const teamWithTopology = TeamDef.parse({
+      id: "test-team",
+      name: "Test Team",
+      members: [
+        { agent: "test-lead", role: "lead", entry_point: true },
+        { agent: "test-specialist", role: "specialist" },
+      ],
+      communication: { topology: "lead-reviewer" },
+    });
+    const allMembers = [
+      { member: { agent: "test-lead", role: "lead" as const, entry_point: true }, agent },
+    ];
+    const result = renderAgentsFile(
+      { agent, team: teamWithTopology, member: { agent: "test-lead", role: "lead", entry_point: true } },
+      allMembers,
+    );
+    expect(result).toContain("lead-reviewer");
+    expect(result).toContain("review");
+  });
 });
