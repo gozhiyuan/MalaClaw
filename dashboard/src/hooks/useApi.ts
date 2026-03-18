@@ -138,3 +138,25 @@ export function useUsage() {
 export function useAgentStatuses() {
   return useQuery<Record<string, AgentStatusEntry>>({ queryKey: ["agentStatuses"], queryFn: () => fetchJson("/usage/agents") });
 }
+
+export function useUpdateKanban() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, teamId, content }: { projectId: string; teamId: string; content: string }) =>
+      fetch(`${BASE}/projects/${projectId}/kanban/${teamId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      }).then((r) => {
+        if (!r.ok) return r.json().then((b: any) => { throw new Error(b.error ?? `HTTP ${r.status}`); });
+        return r.json();
+      }),
+    onSuccess: (_, { projectId, teamId }) => {
+      qc.invalidateQueries({ queryKey: ["kanban", projectId, teamId] });
+    },
+  });
+}
+
+export function useBlockers(projectId: string, teamId: string) {
+  return useQuery({ queryKey: ["blockers", projectId, teamId], queryFn: () => fetchJson<{ content: string | null }>(`/projects/${projectId}/blockers/${teamId}`) });
+}

@@ -16,6 +16,8 @@ import manifestRoutes from "./routes/manifest.js";
 import diffRoutes from "./routes/diff.js";
 import { GatewayClient } from "./services/gateway.js";
 import { createUsageRoutes } from "./routes/usage.js";
+import { MemoryWriter } from "./services/memory-writer.js";
+import { createMemoryRoutes } from "./routes/memory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,6 +83,9 @@ export async function createServer(opts: { host?: string; port?: number } = {}) 
   await app.register(manifestRoutes);
   await app.register(diffRoutes);
   await app.register(createUsageRoutes(gateway));
+
+  const memoryWriter = new MemoryWriter();
+  await app.register(createMemoryRoutes(memoryWriter));
 
   // Graceful shutdown
   const shutdown = async () => {
