@@ -1,5 +1,6 @@
 import { useManifest, useDiff, useInstall } from "../hooks/useApi";
 import { DiffView } from "../components/DiffView";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 export function Config() {
   const { data: manifest, isLoading: manifestLoading } = useManifest();
@@ -23,6 +24,7 @@ export function Config() {
               overflow: "auto",
             }}
           >
+            <ErrorBoundary name="ManifestView">
             {manifestLoading ? (
               <span style={{ color: "#8b949e" }}>Loading manifest...</span>
             ) : manifest ? (
@@ -32,6 +34,7 @@ export function Config() {
             ) : (
               <span style={{ color: "#8b949e" }}>No manifest found.</span>
             )}
+            </ErrorBoundary>
           </div>
         </div>
 
@@ -48,6 +51,7 @@ export function Config() {
               overflow: "auto",
             }}
           >
+            <ErrorBoundary name="DiffView">
             {diffLoading ? (
               <span style={{ color: "#8b949e" }}>Loading diff...</span>
             ) : diffEntries && diffEntries.length > 0 ? (
@@ -55,6 +59,7 @@ export function Config() {
             ) : (
               <span style={{ color: "#8b949e" }}>No changes detected.</span>
             )}
+            </ErrorBoundary>
           </div>
         </div>
       </div>

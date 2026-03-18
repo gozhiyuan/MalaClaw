@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStarters, useInitStarter } from "../hooks/useApi";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 export function Starters() {
   const { data: starters, isLoading, error } = useStarters();
@@ -61,6 +62,7 @@ export function Starters() {
       {filtered.length === 0 ? (
         <div style={{ color: "#8b949e", textAlign: "center", padding: 24 }}>No starters match your search.</div>
       ) : (
+        <ErrorBoundary name="StarterGrid">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
           {filtered.map((s) => (
             <div
@@ -130,6 +132,7 @@ export function Starters() {
             </div>
           ))}
         </div>
+        </ErrorBoundary>
       )}
     </div>
   );

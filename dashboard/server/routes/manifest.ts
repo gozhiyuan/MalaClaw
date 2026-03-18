@@ -3,6 +3,8 @@ import { store } from "../services/store.js";
 import { broadcast } from "../ws.js";
 
 let installRunning = false;
+let installStartedAt = 0;
+const INSTALL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 const routes: FastifyPluginAsync = async (app) => {
   app.get("/api/manifest", async () => {
@@ -15,6 +17,10 @@ const routes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/api/install", async (req, reply) => {
+    // Auto-release stale mutex after timeout
+    if (installRunning && Date.now() - installStartedAt > INSTALL_TIMEOUT_MS) {
+      installRunning = false;
+    }
     if (installRunning) {
       return reply.status(409).send({
         error: "Install already running",
@@ -23,6 +29,7 @@ const routes: FastifyPluginAsync = async (app) => {
       });
     }
     installRunning = true;
+    installStartedAt = Date.now();
     try {
       const result = await store.install({
         projectDir: (req.body as any)?.projectDir,

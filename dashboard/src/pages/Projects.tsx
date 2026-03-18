@@ -4,6 +4,7 @@ import { useProjects, useProject, useTeams } from "../hooks/useApi";
 import { AgentList } from "../components/AgentList";
 import { KanbanBoard } from "../components/KanbanBoard";
 import { TeamGraph } from "../components/TeamGraph";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 function ProjectDetail({ project }: { project: Project }) {
   const { data: detail, isLoading } = useProject(project.id);
@@ -29,19 +30,25 @@ function ProjectDetail({ project }: { project: Project }) {
       {projectTeams.length > 0 && (
         <div>
           <h4 style={{ color: "#f0f6fc", margin: "0 0 8px" }}>Team Members</h4>
-          <AgentList teams={projectTeams} />
+          <ErrorBoundary name="AgentList">
+            <AgentList teams={projectTeams} />
+          </ErrorBoundary>
         </div>
       )}
 
       <div>
         <h4 style={{ color: "#f0f6fc", margin: "0 0 8px" }}>Kanban</h4>
-        <KanbanBoard projectId={project.id} teamId={project.entry_team} />
+        <ErrorBoundary name="KanbanBoard">
+          <KanbanBoard projectId={project.id} teamId={project.entry_team} />
+        </ErrorBoundary>
       </div>
 
       {projectTeams.map((team) => (
         <div key={team.id}>
           <h4 style={{ color: "#f0f6fc", margin: "0 0 8px" }}>Graph: {team.name}</h4>
-          <TeamGraph team={team} />
+          <ErrorBoundary name={`TeamGraph-${team.id}`}>
+            <TeamGraph team={team} />
+          </ErrorBoundary>
         </div>
       ))}
     </div>
