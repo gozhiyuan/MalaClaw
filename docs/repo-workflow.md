@@ -1,6 +1,6 @@
 # Using This Repo
 
-This repo gives you a CLI, built-in packs, team templates, and skill templates for OpenClaw.
+This repo gives you a CLI, built-in packs, team templates, and skill templates for multi-agent runtimes (OpenClaw, Claude Code, Codex, ClawTeam).
 
 ## 1. Install the CLI from this repo
 
@@ -82,10 +82,22 @@ malaclaw install
 malaclaw doctor
 ```
 
-This installs the selected teams, seeds shared memory files, and patches `~/.openclaw/openclaw.json` unless you use `--no-openclaw`.
+This installs the selected teams, seeds shared memory files, writes initial agent telemetry, and provisions workspaces via the runtime adapter.
+
+By default, install targets OpenClaw (patches `~/.openclaw/openclaw.json`). Set `runtime:` in `malaclaw.yaml` to target a different runtime:
+
+```yaml
+version: 1
+runtime: clawteam    # or openclaw (default), claude-code, codex
+```
+
 Starter-based projects also include `DEMO_PROJECT.md`, copied from the richer demo card.
 
-The installed agent workspaces contain the Markdown files OpenClaw actually reads, such as `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, and `MEMORY.md`.
+The installed agent workspaces contain runtime-specific files:
+- **OpenClaw:** `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`
+- **Claude Code:** aggregated `CLAUDE.md`
+- **Codex:** `AGENTS.md` as primary prompt
+- **ClawTeam:** `team.toml` + `spawn-catalog.json` + per-agent prompt dirs
 
 ## 4. Find the right team entry point
 
@@ -163,7 +175,18 @@ They coordinate by:
 
 - leads spawning sub-agents with `sessions_spawn`
 - reading and writing shared memory files
-- following the team graph and shared memory ownership rules
+- following the team graph, communication topology, and shared memory ownership rules
+
+Each team has a **communication topology** that controls coordination patterns:
+
+| Topology | How agents coordinate |
+|---|---|
+| **star** (default) | All tasks flow through the lead. Workers report only to the lead. |
+| **lead-reviewer** | Tasks flow through lead. Workers may request review from designated reviewers. |
+| **pipeline** | Tasks flow sequentially through stages. Each agent passes to the next. |
+| **peer-mesh** | Agents may communicate with any other agent via shared memory. |
+
+Topology is either declared explicitly in team YAML or auto-inferred from the delegation graph. Use `malaclaw team show <id>` to see the resolved topology. When a topology is incompatible with the target runtime, it is automatically downgraded to **star**.
 
 This shared memory is an orchestration layer managed by `malaclaw`. It does not replace OpenClaw's native memory tools for each agent workspace.
 
@@ -390,9 +413,29 @@ Opens http://localhost:3456 with four tabs: Overview, Projects, Starters, and Co
 
 The dashboard watches your project files and pushes real-time updates via WebSocket. You can browse starters and init projects directly from the UI.
 
+The dashboard reads normalized agent telemetry from `~/.malaclaw/agents/<id>/state.json`, making it runtime-agnostic — it shows the same agent status view whether you're using OpenClaw, ClawTeam, or any other supported runtime.
+
 For remote access options, see [docs/remote-access.md](./remote-access.md).
 
-## 14. Typical workflow summary
+## 14. Agent telemetry
+
+After install, `malaclaw` tracks agent status across all runtimes via normalized telemetry files.
+
+Each agent has a `state.json` at `~/.malaclaw/agents/<agentId>/state.json` with:
+
+- `status`: `idle`, `working`, `error`, or `offline`
+- `runtime`: which runtime is executing
+- `source`: how the telemetry was captured (`gateway`, `clawteam`, `heartbeat`, `manual`)
+- `ttlSeconds`: after this period with no update, status auto-downgrades to `idle`
+
+Two observer paths feed telemetry:
+
+1. **OpenClaw:** Gateway WebSocket at `ws://localhost:18789`
+2. **ClawTeam:** Reads native state from `~/.clawteam/teams/*/`
+
+The dashboard and CLI read only the normalized files, so telemetry works identically regardless of runtime.
+
+## 15. Typical workflow summary
 
 ```bash
 # one-time setup in this repo

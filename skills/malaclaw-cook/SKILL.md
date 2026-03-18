@@ -1,11 +1,13 @@
 ---
 name: malaclaw-cook
-description: Use when managing projects installed by malaclaw: inspect installed projects, choose entry-point teams, add or retarget skills in malaclaw.yaml, run install/diff/doctor, and refresh project agents after project or skill changes.
+description: Use when managing projects installed by malaclaw: inspect installed projects, choose entry-point teams and runtime targets, configure communication topologies, add or retarget skills in malaclaw.yaml, run install/diff/doctor, and refresh project agents after project or skill changes.
 ---
 
 # MalaClaw Manager
 
-This skill manages `malaclaw` projects. It is for project topology, skill placement, and install health, not for executing end-user work inside the project itself.
+This skill manages `malaclaw` projects. It is for project topology, runtime targeting, skill placement, and install health, not for executing end-user work inside the project itself.
+
+`malaclaw` is runtime-agnostic — it provisions agents to OpenClaw, Claude Code, Codex, or ClawTeam via an adapter registry.
 
 It must also work safely when a repo is not yet managed by `malaclaw`.
 
@@ -15,28 +17,111 @@ It must also work safely when a repo is not yet managed by `malaclaw`.
 - Listing installed projects and entry points
 - Listing, inspecting, and initializing starter demo projects
 - Reading demo-project metadata and starter cards to choose between default workflow and managed workflow
-- Promoting an ad hoc OpenClaw workflow into `default-managed` or a fuller managed project
+- Promoting an ad hoc workflow into `default-managed` or a fuller managed project
+- Choosing and setting the target runtime (`openclaw`, `claude-code`, `codex`, `clawteam`)
+- Choosing a communication topology for teams (`star`, `lead-reviewer`, `pipeline`, `peer-mesh`)
 - Inspecting a project's manifest, lockfile, and runtime registration
 - Adding or removing packs in `malaclaw.yaml`
 - Adding a skill to a project and targeting it to the correct agents or teams
 - Re-running install so agent workspaces and skills are refreshed
-- Checking skill activation and install failures
+- Checking skill activation, install failures, and agent telemetry
 
 ## Core Rules
 
 - First determine whether the repo is in managed mode, default Claude Code mode, default OpenClaw mode, or unconfigured mode.
-- Do not assume OpenClaw auto-installs missing skills.
+- Do not assume any runtime auto-installs missing skills.
 - Do not assume a project skill is attached to every agent.
 - Use the demo-project card and starter metadata to recommend either the default workflow or a managed team install.
 - Prefer editing `malaclaw.yaml`, then running `malaclaw diff`, then `malaclaw install`.
 - After changing project packs or skills, verify with `malaclaw doctor` and `malaclaw skill check`.
 - Do not remove packs or skills unless the user asked for that change.
-- malaclaw runs ON TOP OF OpenClaw. OpenClaw is the runtime (memory, skills, sessions).
-  malaclaw scaffolds the project structure, agents, and skill targeting.
+- malaclaw is the project and orchestration layer. The runtime (OpenClaw, Claude Code, Codex, or ClawTeam) owns agent sessions, memory, and skill execution.
+  malaclaw scaffolds the project structure, agents, topology, and skill targeting.
 - Single-agent mode: use `default-managed` starter — one generalist agent, no team overhead.
   Do not build a full team unless the user explicitly wants multi-agent coordination.
-- Available bundled teams: dev-company, content-factory, research-lab, autonomous-startup
+- Available bundled teams: dev-company, content-factory, research-lab, autonomous-startup, personal-assistant, automation-ops, customer-service, finance-ops, data-ops
 - Skills are per agent, not per team. Each agent YAML declares its own skills list.
+
+## Runtime Targeting
+
+### Supported Runtimes
+
+| Runtime | Manifest value | What install does | Best for |
+|---|---|---|---|
+| OpenClaw | `openclaw` (default) | Patches `openclaw.json`, creates agent workspace dirs | Full multi-agent orchestration with Gateway |
+| Claude Code | `claude-code` | Generates `CLAUDE.md` per agent workspace | Claude Code users who want team structure |
+| Codex | `codex` | Generates `AGENTS.md` per agent workspace | Codex users who want team structure |
+| ClawTeam | `clawteam` | Exports `team.toml` + spawn catalog | Advanced topologies (pipeline, peer-mesh) |
+
+### How to Choose a Runtime
+
+Ask the user which tool they are already using:
+- Already using OpenClaw → `runtime: openclaw`
+- Already using Claude Code → `runtime: claude-code`
+- Already using Codex → `runtime: codex`
+- Need pipeline or peer-mesh topology → `runtime: clawteam`
+- Not sure → default to `openclaw`
+
+Set the runtime in `malaclaw.yaml`:
+
+```yaml
+version: 1
+runtime: clawteam    # or openclaw (default), claude-code, codex
+packs:
+  - id: dev-company
+```
+
+### Runtime-Specific Handoff
+
+After install, the handoff differs by runtime:
+
+- **OpenClaw:** "Open this agent in OpenClaw: `store__<project>__<team>__<agent>`"
+- **Claude Code:** "Open the agent workspace and start Claude Code. Your context is in `CLAUDE.md`."
+- **Codex:** "Open the agent workspace and start Codex. Your context is in `AGENTS.md`."
+- **ClawTeam:** "Start the team with ClawTeam. The team definition is in `team.toml`."
+
+## Communication Topologies
+
+### Topology Types
+
+| Topology | Description | Runtime support |
+|---|---|---|
+| **star** | All tasks flow through the lead. Workers report only to the lead. | All runtimes |
+| **lead-reviewer** | Tasks flow through lead. Workers may request review from designated reviewers. | OpenClaw, ClawTeam |
+| **pipeline** | Tasks flow sequentially through stages. Each agent passes to next. | ClawTeam only |
+| **peer-mesh** | Agents may communicate with any other agent via shared memory. | ClawTeam only |
+
+### How to Choose a Topology
+
+- **Default to star** unless the user describes a workflow that clearly fits another pattern.
+- Use **lead-reviewer** when the user mentions code review, quality gates, or approval steps.
+- Use **pipeline** when the user describes sequential stages (e.g., "research → write → edit → publish").
+- Use **peer-mesh** when agents need to coordinate freely without a central lead.
+- If the user's chosen topology is incompatible with their runtime, warn them: it will be downgraded to star.
+
+### Setting Topology
+
+Topology can be declared explicitly in team YAML:
+
+```yaml
+communication:
+  topology: lead-reviewer
+  enforcement: strict    # or "advisory" (default)
+```
+
+Or omitted — `malaclaw` will auto-infer from the team's delegation graph. Use `malaclaw team show <id>` to see the resolved topology.
+
+### Topology Downgrade Rules
+
+When a topology is incompatible with the target runtime, agents receive star-topology coordination rules instead:
+
+| Topology | Downgrades on |
+|---|---|
+| lead-reviewer | Claude Code, Codex |
+| pipeline | Claude Code, Codex, OpenClaw |
+| peer-mesh | Claude Code, Codex, OpenClaw |
+
+If the user wants pipeline or peer-mesh and is on OpenClaw, recommend switching to `runtime: clawteam`.
 
 ## Workflow
 
@@ -74,27 +159,29 @@ Run the smallest commands that answer the question:
 - `malaclaw skill show <skill-id>`
 - `malaclaw skill sync`
 
-If the user asks which agent to open in OpenClaw, prefer the project entry-point agent from `project show`.
+If the user asks which agent to use, prefer the project entry-point agent from `project show`. Give the runtime-appropriate handoff (see Runtime-Specific Handoff above).
 
 If the repo is not managed yet:
 
 - explain which default workflow was detected
 - do not claim missing `malaclaw.yaml` is an error by itself
+- ask which runtime the user is currently using
 - suggest `malaclaw init` only when the user wants managed projects, teams, or skills
 
-If the user already has a working ad hoc OpenClaw workflow and wants structure:
+If the user already has a working ad hoc workflow and wants structure:
 
 1. inspect the current repo and runtime state
-2. list the skills they already rely on
-3. decide whether they need:
+2. ask which runtime they are using (OpenClaw, Claude Code, Codex, ClawTeam)
+3. list the skills they already rely on
+4. decide whether they need:
    - default workflow only
    - `default-managed`
    - a fuller starter/team install
-4. if the workflow is repeated, shared, or coordination-heavy, recommend promotion
-5. create or edit `malaclaw.yaml`
-6. target discovered OpenClaw skills into the project
-7. run `malaclaw install`
-8. tell the user which entry-point agent to use next
+5. if the workflow is repeated, shared, or coordination-heavy, recommend promotion
+6. create or edit `malaclaw.yaml` with the correct `runtime:` field
+7. target discovered skills into the project
+8. run `malaclaw install`
+9. give the runtime-specific handoff
 
 If the user is starting from an idea:
 
@@ -126,18 +213,21 @@ When the user says things like:
 follow this promotion flow:
 
 1. detect current mode: default OpenClaw, default Claude Code, or already managed
-2. inspect currently available skills with `malaclaw skill sync`
-3. identify whether the workflow is:
+2. ask which runtime they want to target (default to what they're already using)
+3. inspect currently available skills with `malaclaw skill sync`
+4. identify whether the workflow is:
    - single-agent but persistent
-   - multi-step with repeated tools
-   - multi-agent or delegation-heavy
-4. recommend:
+   - multi-step with repeated tools (consider pipeline topology)
+   - multi-agent or delegation-heavy (consider star or lead-reviewer)
+   - peer-to-peer collaborative (consider peer-mesh, requires ClawTeam)
+5. recommend:
    - stay unmanaged
    - `default-managed`
    - closest starter + customization
-5. initialize the project
-6. attach or retarget the existing skills the user already has in OpenClaw
-7. run install, then hand off to the managed project entry-point agent
+6. if recommending multi-agent, suggest the appropriate topology
+7. initialize the project with the correct `runtime:` field
+8. attach or retarget existing skills
+9. run install, then give the runtime-specific handoff
 
 ### 2. Add or retarget a skill
 
@@ -207,25 +297,33 @@ OpenClaw uses `agent.skills[]` in openclaw.json as a skill filter:
 
 If install succeeds but a skill isn't loading in an agent session, check whether the agent's entry in openclaw.json has a `skills:` key that excludes it. Re-running `malaclaw install` automatically patches this — it adds installed skill IDs to any agent entries that already have an explicit `skills[]` allowlist.
 
-### 5. OpenClaw memory tools
+### 5. Runtime-specific memory and context
 
 Two distinct memory mechanisms exist in malaclaw managed projects:
 
-**OpenClaw native memory** (runtime-owned):
-- `memory_search` and `memory_get` are native OpenClaw tools
-- They index files in **this agent's own workspace directory** (MEMORY.md, memory/*.md)
-- Each agent workspace includes a MEMORY.md that explains this
+**Runtime-native memory** (runtime-owned):
+- **OpenClaw:** `memory_search` and `memory_get` index files in each agent's workspace (MEMORY.md, memory/*.md)
+- **Claude Code:** context comes from the generated `CLAUDE.md` in each agent workspace
+- **Codex:** context comes from the generated `AGENTS.md` in each agent workspace
+- **ClawTeam:** context comes from `team.toml` and per-agent prompt dirs
 
 **Shared team markdown files** (malaclaw convention):
 - kanban.md, tasks-log.md, etc. are scaffolded by malaclaw as coordination files
 - They live **outside** each agent's indexed workspace (in the team's shared memory directory)
-- Access them **by file path**, not via `memory_search` — they are not indexed by OpenClaw
-- They are a project/team coordination layer on top of OpenClaw, not a replacement for native memory
+- Access them **by file path**, not via runtime-native memory search — they are not indexed by any runtime
+- They are a project/team coordination layer, not a replacement for native memory
 
-See MEMORY.md in each agent workspace for the exact paths and access patterns.
+See MEMORY.md (OpenClaw) or the generated prompt file (other runtimes) in each agent workspace for the exact paths and access patterns.
 
-Note: Claude Code remains unsupported as a runtime target until a real adapter is built
-(`src/lib/adapters/claude-code.ts` is still a stub). Use OpenClaw as the runtime.
+### 6. Agent telemetry
+
+After install, each agent has telemetry at `~/.malaclaw/agents/<agentId>/state.json`.
+
+- **Status values:** `idle`, `working`, `error`, `offline`
+- **Source values:** `gateway` (OpenClaw), `clawteam` (ClawTeam state), `heartbeat` (future), `manual` (install-time)
+- **TTL:** status auto-downgrades to `idle` after `ttlSeconds` (default 300s) with no update
+
+The dashboard reads these files for runtime-agnostic agent monitoring. Use `malaclaw dashboard` to view live status.
 
 ## Project Initialization Flow
 
@@ -270,16 +368,32 @@ All installed agents and targeted skills should be healthy.
 
 ### Step 7: Hand off to user
 Tell the user:
-- The exact agent ID to open in OpenClaw (the entry-point agent)
+- The exact agent ID (the entry-point agent from `project show`)
+- Runtime-specific instructions for how to start using it
 - A concrete first task to give that agent, based on the demo's bootstrap_prompt
 
-Example handoff:
+Example handoffs by runtime:
+
+**OpenClaw:**
 "Your Habit Tracker is ready. Open this agent in OpenClaw:
 → `store__<project-id>__personal-assistant__personal-assistant-lead`
 
 Give it a task like:
-'Set up daily habit tracking for: morning exercise, reading 30 mins, and no phone after 9pm.
-Send me a daily accountability check-in at 8pm via Telegram.'"
+'Set up daily habit tracking for: morning exercise, reading 30 mins, and no phone after 9pm.'"
+
+**Claude Code:**
+"Your Habit Tracker is ready. Open the agent workspace:
+→ `~/.malaclaw/workspaces/store/<project-id>/personal-assistant/personal-assistant-lead/`
+Start Claude Code in that directory. Your context is in `CLAUDE.md`."
+
+**Codex:**
+"Your Habit Tracker is ready. Open the agent workspace:
+→ `~/.malaclaw/workspaces/store/<project-id>/personal-assistant/personal-assistant-lead/`
+Start Codex in that directory. Your context is in `AGENTS.md`."
+
+**ClawTeam:**
+"Your Habit Tracker is ready. Start the team with ClawTeam:
+→ Team definition: `~/.malaclaw/workspaces/store/<project-id>/personal-assistant/team.toml`"
 
 ## Reference
 

@@ -23,13 +23,14 @@ malaclaw starter suggest "<idea>"
 malaclaw project list
 malaclaw project show <project-id>
 malaclaw project status
-malaclaw team show <team-id>
+malaclaw team show <team-id>          # shows topology, members, shared memory
 malaclaw agent show <agent-id>
 malaclaw skill show <skill-id>
 malaclaw skill check
 malaclaw skill sync
 malaclaw diff
 malaclaw doctor
+malaclaw dashboard                    # web UI with runtime-agnostic telemetry
 ```
 
 ## Apply state
@@ -63,7 +64,22 @@ Demo project metadata:
 
 ## Manifest patterns
 
-Project-scoped skill targeting:
+### Runtime targeting
+
+```yaml
+version: 1
+runtime: openclaw       # default — or claude-code, codex, clawteam
+```
+
+### Communication topology (in team YAML)
+
+```yaml
+communication:
+  topology: star         # or lead-reviewer, pipeline, peer-mesh
+  enforcement: advisory  # or strict
+```
+
+### Project-scoped skill targeting
 
 ```yaml
 skills:
@@ -82,9 +98,11 @@ skills:
         - research-lab
 ```
 
-Project definition:
+### Project definition
 
 ```yaml
+version: 1
+runtime: clawteam
 project:
   id: my-project
   name: "My Project"
@@ -92,7 +110,7 @@ project:
   entry_team: dev-company
 ```
 
-Starter-generated project with team-wide manager skill:
+### Starter-generated project with team-wide manager skill
 
 ```yaml
 skills:
@@ -102,4 +120,27 @@ skills:
         - content-factory
 ```
 
-When an external skill is missing, guide the user to install or configure it in OpenClaw first, optionally run `malaclaw skill sync` to refresh availability, then re-run `malaclaw install` so the targeted agents receive it.
+When an external skill is missing, guide the user to install or configure it in their runtime first, optionally run `malaclaw skill sync` to refresh availability, then re-run `malaclaw install` so the targeted agents receive it.
+
+## Runtime compatibility quick reference
+
+| Topology | Claude Code | Codex | OpenClaw | ClawTeam |
+|---|---|---|---|---|
+| star | native | native | native | native |
+| lead-reviewer | downgrade→star | downgrade→star | native | native |
+| pipeline | downgrade→star | downgrade→star | downgrade→star | native |
+| peer-mesh | downgrade→star | downgrade→star | downgrade→star | native |
+
+## Available teams
+
+| Team | Entry point | Focus |
+|---|---|---|
+| dev-company | pm | Software development |
+| content-factory | editor | Content, publishing, media |
+| research-lab | research-lead | Research, analysis, reports |
+| autonomous-startup | varies | Full-stack autonomy |
+| personal-assistant | personal-assistant-lead | Life admin, calendar, health |
+| automation-ops | automation-lead | Workflows, integrations |
+| customer-service | service-lead | Multi-channel support |
+| finance-ops | finance-lead | Markets, trading, risk |
+| data-ops | data-lead | ETL, analytics, storage |

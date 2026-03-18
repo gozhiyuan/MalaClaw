@@ -1,15 +1,15 @@
 # malaclaw
 
-`malaclaw` is a project layer on top of OpenClaw.
+`malaclaw` is a runtime-agnostic project layer for multi-agent teams.
 
-It gives OpenClaw a catalog of demo projects, starter manifests, reusable agent teams, and skill-targeting rules so a user can go from:
+It gives agent runtimes (OpenClaw, Claude Code, Codex, ClawTeam) a catalog of demo projects, starter manifests, reusable agent teams, and skill-targeting rules so a user can go from:
 
 - "I have an idea"
 - or "I already hacked together some skills and prompts"
 
-to a repeatable managed project with the right entry-point agent, team structure, skills, and setup guidance.
+to a repeatable managed project with the right entry-point agent, team structure, communication topology, skills, and setup guidance — on any supported runtime.
 
-Pain point: the bottleneck in OpenClaw adoption is usually not raw skill count. It is helping users discover repeatable ways OpenClaw can improve a real project, then turning those workflows into something structured and reusable.
+Pain point: the bottleneck in multi-agent adoption is usually not raw skill count. It is helping users discover repeatable ways agents can improve a real project, then turning those workflows into something structured, reusable, and runtime-portable.
 
 ## Get Started In OpenClaw
 
@@ -65,6 +65,42 @@ Help me turn this repo into a managed project.
 Add a GitHub skill to this project.
 Should this stay single-agent or become a team?
 ```
+
+## Supported Runtimes
+
+`malaclaw` provisions agents to different runtimes via an adapter registry. Set `runtime:` in `malaclaw.yaml` to target the desired runtime.
+
+| Runtime | Manifest value | What happens on install |
+|---|---|---|
+| OpenClaw | `openclaw` (default) | Patches `~/.openclaw/openclaw.json`, creates agent workspace dirs |
+| Claude Code | `claude-code` | Generates `CLAUDE.md` per agent workspace |
+| Codex | `codex` | Generates `AGENTS.md` per agent workspace |
+| ClawTeam | `clawteam` | Exports `team.toml` + spawn catalog for native ClawTeam orchestration |
+
+Example:
+
+```yaml
+# malaclaw.yaml
+version: 1
+runtime: clawteam    # or openclaw (default), claude-code, codex
+packs:
+  - id: dev-company
+```
+
+## Communication Topologies
+
+Each team can declare (or auto-infer) a communication topology that controls how agents coordinate:
+
+| Topology | Description | Runtime support |
+|---|---|---|
+| **star** | All tasks flow through the lead. Workers report only to the lead. | All runtimes |
+| **lead-reviewer** | Tasks flow through lead. Workers may request review from designated reviewers. | OpenClaw, ClawTeam |
+| **pipeline** | Tasks flow sequentially through stages. Each agent passes to next stage. | ClawTeam only |
+| **peer-mesh** | Agents may communicate with any other agent via shared memory. | ClawTeam only |
+
+When a topology is incompatible with the target runtime, it is automatically downgraded to **star** with a warning. Topology rules are embedded in each agent's `AGENTS.md` as role-specific coordination instructions.
+
+Use `malaclaw team show <id>` to see the resolved topology for any team.
 
 ## What `malaclaw` Does Through OpenClaw
 
@@ -162,18 +198,46 @@ The bundled `malaclaw-cook` skill works the same way conceptually:
 
 `malaclaw` uses YAML as its authoring and orchestration format.
 
-OpenClaw does not need to read the team or agent YAML files directly. Instead:
+No runtime reads the team or agent YAML files directly. Instead:
 
 1. `malaclaw` reads the YAML definitions for agents, teams, packs, starters, and skills
-2. it renders the runtime Markdown files OpenClaw actually uses
-3. it provisions those files into the agent workspaces that OpenClaw runs
+2. it renders runtime-specific files via the adapter registry
+3. it provisions those files into the agent workspaces the target runtime uses
 
 In other words:
 
 - YAML is the `malaclaw` control plane
-- rendered files like `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, and `MEMORY.md` are the OpenClaw runtime contract
+- the adapter registry dispatches to runtime-specific provisioners
+- rendered files are the runtime contract:
+  - **OpenClaw:** `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `AGENTS.md`, `USER.md`, `MEMORY.md`
+  - **Claude Code:** aggregated `CLAUDE.md` per agent workspace
+  - **Codex:** `AGENTS.md` as primary prompt per agent workspace
+  - **ClawTeam:** `team.toml` + `spawn-catalog.json` + per-agent prompt dirs
 
-This is why the YAML structure is a good fit here: it is easy to validate, diff, generate from, and customize, while still compiling down to the exact OpenClaw workspace shape.
+This is why the YAML structure is a good fit here: it is easy to validate, diff, generate from, and customize, while compiling down to the exact workspace shape each runtime expects.
+
+## Agent Telemetry
+
+After install, `malaclaw` tracks agent status across all runtimes via normalized telemetry files at `~/.malaclaw/agents/<agentId>/state.json`.
+
+```json
+{
+  "agentId": "store__proj__team__pm",
+  "runtime": "clawteam",
+  "status": "working",
+  "detail": "Research market trends",
+  "updatedAt": "2026-03-17T18:20:00Z",
+  "ttlSeconds": 300,
+  "source": "clawteam"
+}
+```
+
+Two observer paths feed telemetry:
+
+1. **OpenClaw direct:** Gateway WebSocket → normalized telemetry files
+2. **ClawTeam-managed:** Reads `~/.clawteam/` native state → normalized telemetry files
+
+Both paths write the same schema. The dashboard reads only the normalized files, making it runtime-agnostic. After `ttlSeconds` with no update, status auto-downgrades to `idle`.
 
 ## Bundled Catalog In This Repo
 
@@ -239,7 +303,7 @@ malaclaw/
 ├── packs/                 # reusable pack definitions
 ├── templates/
 │   ├── agents/            # agent YAML templates
-│   ├── teams/             # team graphs + shared memory rules
+│   ├── teams/             # team graphs + topology + shared memory rules
 │   └── skills/            # bundled skill metadata
 ├── starters/              # starter definitions for demo/project scaffolding
 ├── demo-projects/
@@ -247,7 +311,12 @@ malaclaw/
 │   └── cards/             # richer setup/execution cards per demo
 ├── skills/
 │   └── malaclaw-cook/
+├── partials/              # shared Markdown fragments for rendered bootstrap files
 ├── src/                   # CLI + install/runtime logic
+│   └── lib/
+│       ├── adapters/      # runtime adapters (openclaw, claude-code, codex, clawteam)
+│       ├── telemetry.ts   # per-agent telemetry read/write
+│       └── topology.ts    # topology inference, validation, guidance
 ├── dashboard/             # web dashboard (Fastify server + React SPA)
 │   ├── server/            # Fastify routes, WebSocket, file watcher
 │   └── src/               # React components, pages, hooks
@@ -285,6 +354,7 @@ Teams define:
 - members
 - lead/specialist/reviewer roles
 - delegation graph
+- communication topology (star, lead-reviewer, pipeline, peer-mesh)
 - shared memory files
 
 Examples live in:
@@ -352,11 +422,12 @@ Main state files:
 
 | File | Purpose |
 |---|---|
-| `malaclaw.yaml` | desired project topology |
+| `malaclaw.yaml` | desired project state (packs, skills, runtime target) |
 | `malaclaw.lock` | resolved install state |
 | `~/.malaclaw/runtime.json` | installed project registry |
 | `~/.malaclaw/workspaces/store/...` | managed agent workspaces |
-| `~/.openclaw/openclaw.json` | OpenClaw runtime config patched during install |
+| `~/.malaclaw/agents/<id>/state.json` | per-agent telemetry (normalized across runtimes) |
+| `~/.openclaw/openclaw.json` | OpenClaw runtime config (patched when `runtime: openclaw`) |
 
 ## Memory Boundary
 

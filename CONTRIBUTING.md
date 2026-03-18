@@ -17,6 +17,8 @@
 - [ ] Agent has a realistic `soul.persona` with correct `{{variable}}` syntax
 - [ ] Capabilities match the role (`sessions_spawn: false` for non-leads)
 - [ ] All `shared_memory` files have explicit `access` and `writer` fields
+- [ ] Team has a `communication.topology` or a graph that infers correctly (check with `malaclaw team show`)
+- [ ] If using non-star topologies, note runtime compatibility (lead-reviewer needs OpenClaw/ClawTeam; pipeline/peer-mesh need ClawTeam)
 - [ ] A `description` is provided in the pack YAML
 - [ ] Trust tier is set correctly (`local` for personal, `community` for submissions)
 
@@ -37,6 +39,12 @@ npm test
 npm run build
 malaclaw validate
 ```
+
+## Runtime compatibility
+
+Teams using advanced topologies (pipeline, peer-mesh) require ClawTeam as the runtime target. Lead-reviewer topology requires OpenClaw or ClawTeam. Star topology works on all runtimes.
+
+When contributing a team with non-star topology, document the runtime requirement in the pack description.
 
 ## Compatibility policy
 

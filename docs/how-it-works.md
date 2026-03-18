@@ -32,6 +32,28 @@ This document explains the technical architecture: data flow, file formats, the 
 | WebSocket events | Real-time file change notifications via chokidar file watcher |
 | Remote access | Cloudflare Tunnel, Tailscale, or SSH tunnel (see `docs/remote-access.md`) |
 
+### Runtime Adapters and Telemetry
+
+| Feature | Description |
+|---|---|
+| Runtime adapters | Install dispatches to runtime-specific provisioners: OpenClaw, Claude Code, Codex, ClawTeam |
+| `runtime:` manifest field | Set target runtime in `malaclaw.yaml` — defaults to `openclaw` |
+| Agent telemetry | Normalized `state.json` per agent at `~/.malaclaw/agents/<id>/state.json` |
+| Two-path observer | OpenClaw Gateway WebSocket + ClawTeam native state reader |
+| TTL-based auto-idle | Status auto-downgrades to `idle` after `ttlSeconds` with no update |
+| `RuntimeStatusProvider` | Dashboard aggregates telemetry from all active runtime observers |
+
+### Communication Topologies
+
+| Feature | Description |
+|---|---|
+| 4 topology types | `star`, `lead-reviewer`, `pipeline`, `peer-mesh` |
+| Topology inference | Auto-detected from team graph structure (hub-spoke → star, cycles → peer-mesh, chains → pipeline) |
+| Runtime validation | Validates topology compatibility with target runtime; auto-downgrades when incompatible |
+| Role-specific guidance | Each agent's AGENTS.md includes topology-aware coordination rules |
+| `team show` display | `malaclaw team show <id>` shows resolved topology with description |
+| Enforcement modes | `advisory` (default) or `strict` enforcement of topology rules |
+
 ### Core Foundations
 
 | Feature | Description |
@@ -45,7 +67,7 @@ This document explains the technical architecture: data flow, file formats, the 
 | Demo project catalog | Generated `demo-projects/index.yaml` and per-demo cards provide richer execution/setup guidance |
 | Pack compatibility | `compatibility.node_min` / `openclaw_min` in pack YAML, checked by `doctor` |
 | Skill installation | Skills are cached at `~/.malaclaw/cache/skills/` and symlinked per workspace |
-| Test suite | Vitest tests covering schema, renderer, resolver, overlay, compat, skill-fetch, starters, and workflow detection |
+| Test suite | Vitest tests covering schema, renderer, resolver, overlay, compat, skill-fetch, starters, telemetry, adapters, topology, and workflow detection |
 
 ---
 
@@ -82,8 +104,21 @@ This document explains the technical architecture: data flow, file formats, the 
 │                            │                               │
 │              ┌─────────────▼──────────────┐               │
 │              │         Adapters           │               │
-│              │  openclaw.ts (full impl)   │               │
-│              │  claude-code.ts (stub)     │               │
+│              │  registry.ts (dispatch)    │               │
+│              │  openclaw.ts (provision +  │               │
+│              │              observe)      │               │
+│              │  claude-code.ts (CLAUDE.md)│               │
+│              │  codex.ts (AGENTS.md)      │               │
+│              │  clawteam.ts (team.toml +  │               │
+│              │              observer)     │               │
+│              └─────────────┬──────────────┘               │
+│                            │                               │
+│              ┌─────────────▼──────────────┐               │
+│              │       Telemetry + Topology │               │
+│              │  telemetry.ts (read/write  │               │
+│              │    agent state.json)       │               │
+│              │  topology.ts (infer,       │               │
+│              │    validate, guidance)     │               │
 │              └─────────────┬──────────────┘               │
 └────────────────────────────┼────────────────────────────────┘
                              │
@@ -92,6 +127,7 @@ This document explains the technical architecture: data flow, file formats, the 
            │                                    │
            │  ~/.malaclaw/                │  ← runtime
            │    runtime.json                    │
+           │    agents/<id>/state.json          │  ← telemetry
            │    workspaces/store/<project>/<team>/<agent>/│
            │      SOUL.md                       │
            │      IDENTITY.md                   │
@@ -107,6 +143,9 @@ This document explains the technical architecture: data flow, file formats, the 
            │  ~/.openclaw/workspace/     ◀─patch │    config
            │    TOOLS.md                        │
            │    AGENTS.md                       │
+           │                                    │
+           │  ~/.clawteam/teams/*/       ◀─read │  ← ClawTeam
+           │    config.json, spawn_registry.json│    (observer)
            │                                    │
            │  ./malaclaw.yaml             │  ← project
            │  ./malaclaw.lock             │    (committed)
@@ -175,19 +214,28 @@ malaclaw.yaml
   └──────────────────────────────┬──────────────────────┘
                                  │ ResolveResult
                                  ▼
+  getProvisioner(manifest.runtime)
+  ┌─────────────────────────────────────────────────────┐
+  │ Dispatch to runtime-specific provisioner:            │
+  │   openclaw  → patch openclaw.json, create agent dirs│
+  │   claude-code → generate CLAUDE.md per workspace    │
+  │   codex     → generate AGENTS.md per workspace      │
+  │   clawteam  → export team.toml + spawn catalog      │
+  └──────────────────────────────┬──────────────────────┘
+                                 │
+                                 ▼
   installTeam() per pack
   ┌─────────────────────────────────────────────────────┐
   │ provisionAgent() for each agent:                    │
   │   renderBootstrapFiles(agentDef, teamDef, member)   │
   │     → { "SOUL.md": "...", "TOOLS.md": "...", ... }  │
   │   Write files to workspaceDir                       │
-  │   mkdir agentDir (~/.openclaw/agents/store__*/agent)│
+  │   writeAgentTelemetry() → state.json (initial idle) │
   │                                                     │
-  │ upsertAgentEntries(config, entries)                 │
-  │   Patch ~/.openclaw/openclaw.json agents.list       │
-  │                                                     │
-  │ addToAllowlist(config, leadAgentIds)                │
-  │   Patch tools.agentToAgent.allow                    │
+  │ Runtime-specific post-provision:                    │
+  │   openclaw: upsertAgentEntries + addToAllowlist     │
+  │   clawteam: write team.toml + spawn-catalog.json    │
+  │   claude-code/codex: aggregate into single prompt   │
   └──────────────────────────────┬──────────────────────┘
                                  │
                                  ▼
@@ -345,7 +393,8 @@ AgentDef (YAML)         TeamDef (YAML)
   │  SOUL.md         ← soul.persona + soul.tone + bounds  │
   │  IDENTITY.md     ← identity.emoji + vibe + model      │
   │  TOOLS.md        ← capabilities as readable table     │
-  │  AGENTS.md       ← team graph + memory ownership      │
+  │  AGENTS.md       ← team graph + topology rules +      │
+  │                     memory ownership                   │
   │  USER.md         ← user-facing summary                │
   │                                                        │
   └────────────────────────────────────────────────────────┘
@@ -353,7 +402,7 @@ AgentDef (YAML)         TeamDef (YAML)
 
 ### Example: AGENTS.md for Tech Lead
 
-The renderer builds a personal, accurate AGENTS.md for each agent. The shared memory section shows each agent's *specific* access rights:
+The renderer builds a personal, accurate AGENTS.md for each agent. It includes topology-specific coordination rules and per-agent memory access rights:
 
 ```markdown
 # Team: Dev Company
@@ -361,6 +410,17 @@ The renderer builds a personal, accurate AGENTS.md for each agent. The shared me
 ## Your Role
 You are the **lead** — **Tech Lead**.
 As a **lead**, you can spawn sub-agents (`sessions_spawn: true`).
+
+## Communication Topology
+
+This team uses **star** topology.
+
+All tasks flow through the lead. Workers report only to the lead.
+
+**Your coordination rules:**
+- Assign tasks to your direct reports and track their progress.
+- Aggregate results from workers before reporting up.
+- Route cross-worker coordination through yourself.
 
 ## Team Members
 - **Project Manager** (`pm`) — lead *(entry point)*
@@ -383,7 +443,7 @@ You delegate tasks to:
 | blockers.md    | append-only   | all    | **APPEND ONLY** (no overwrites)   |
 ```
 
-The same team YAML produces different AGENTS.md for pm (showing it as the sole writer) vs tech-lead (showing read-only access to those files).
+The same team YAML produces different AGENTS.md for pm (showing it as the sole writer) vs tech-lead (showing read-only access to those files). Topology rules are also tailored per role — a lead sees delegation instructions while a specialist sees reporting instructions.
 
 ---
 
@@ -413,28 +473,39 @@ my-project/                        ← git-committed
 
 ~/.malaclaw/                 ← NOT committed
 ├── runtime.json                  ← installed projects + entry points
+├── agents/                       ← per-agent telemetry (all runtimes)
+│   └── store__my-project__dev-company__pm/
+│       └── state.json            ← normalized status, TTL, source
 ├── workspaces/
 │   └── store/
 │       └── my-project/
 │           └── dev-company/
-│               ├── pm/            ← agent workspace (5 Markdown files)
+│               ├── pm/            ← agent workspace (bootstrap files)
 │               ├── tech-lead/
 │               ├── backend-dev/
 │               └── shared/
 │                   └── memory/    ← shared memory files
 │                       ├── kanban.md
-│                   ├── tasks-log.md
-│                   └── ...
+│                       ├── tasks-log.md
+│                       └── ...
 └── cache/
     ├── packs/                     ← future: downloaded remote packs
     └── skills/                    ← skill cache (symlinked per agent workspace)
         └── <skill-id>@<version>/
 
-~/.openclaw/                       ← OpenClaw's own config (patched)
+~/.openclaw/                       ← OpenClaw's own config (patched when runtime=openclaw)
 ├── openclaw.json                  ← agents.list + tools.agentToAgent
 └── workspace/
     ├── TOOLS.md                   ← store guidance block injected
     └── AGENTS.md                  ← store guidance block injected
+
+~/.clawteam/                       ← ClawTeam native state (read by observer)
+└── teams/
+    └── <team-name>/
+        ├── config.json            ← team config
+        ├── spawn_registry.json    ← process info
+        └── tasks/
+            └── task-*.json        ← task assignments
 ```
 
 **Why project-local manifest + lockfile?**
@@ -475,16 +546,19 @@ As with agents and teams, the YAML skill template is metadata for `malaclaw`. Th
 
 ## Workflow Modes
 
-`malaclaw` supports three practical modes:
+`malaclaw` supports four practical modes:
 
 1. Managed project mode
-   The repo contains `malaclaw.yaml`, and `malaclaw` manages projects, teams, skills, lockfiles, and runtime registration.
+   The repo contains `malaclaw.yaml`, and `malaclaw` manages projects, teams, skills, lockfiles, and runtime registration. The `runtime:` field in the manifest determines which adapter is used.
 
 2. Default Claude Code mode
    The repo contains `CLAUDE.md` or `.claude/`, but no `malaclaw.yaml`. In this case, `malaclaw` treats the repo as a normal Claude Code project and does not assume it is misconfigured.
 
 3. Default OpenClaw mode
    OpenClaw is installed, but the repo does not have `malaclaw.yaml`. In this case, `malaclaw` treats the repo as a normal OpenClaw environment unless the user opts into managed projects.
+
+4. Unconfigured mode
+   None of the above. `malaclaw` offers to bootstrap.
 
 This allows the `malaclaw-cook` skill to inspect default workflows first, then migrate a repo into managed mode only when the user asks for project/team/skill orchestration.
 
@@ -554,6 +628,44 @@ The store ships 9 purpose-built teams across 9 packs:
 | `customer-service` | customer-service | `service-lead` | Multi-channel customer support |
 | `finance-ops` | finance-ops | `finance-lead` | Markets, trading, risk |
 | `data-ops` | data-ops | `data-lead` | ETL, analytics, storage |
+
+---
+
+## Communication Topologies
+
+Teams can declare an explicit communication topology or have one inferred from their delegation graph.
+
+### Topology Types
+
+| Topology | Description | Auto-inferred when |
+|---|---|---|
+| **star** | All tasks flow through the lead. Workers report only to the lead. | Default; hub-spoke graph |
+| **lead-reviewer** | Tasks flow through lead. Workers may request review from designated reviewers. | Graph has review edges from non-leads |
+| **pipeline** | Tasks flow sequentially through stages. | Linear chain (all nodes out-degree ≤1) |
+| **peer-mesh** | Agents may communicate with any other agent. | Graph has delegation cycles |
+
+### Runtime Compatibility
+
+| Topology | Claude Code | Codex | OpenClaw | ClawTeam |
+|---|---|---|---|---|
+| star | native | native | native | native |
+| lead-reviewer | downgrade→star | downgrade→star | native | native |
+| pipeline | downgrade→star | downgrade→star | downgrade→star | native |
+| peer-mesh | downgrade→star | downgrade→star | downgrade→star | native |
+
+When a topology is incompatible with the target runtime, it is automatically downgraded to **star** and a warning is emitted. Agents receive topology-specific coordination rules in their AGENTS.md, tailored to their role (lead, specialist, reviewer).
+
+### Declaring Topology
+
+Explicitly in team YAML:
+
+```yaml
+communication:
+  topology: lead-reviewer
+  enforcement: strict    # or "advisory" (default)
+```
+
+Or let `malaclaw` infer it from the team's `graph:` edges. Use `malaclaw team show <id>` to see the resolved topology.
 
 ---
 
@@ -797,6 +909,10 @@ id: string
 name: string
 version: number
 
+communication:                  # optional — inferred from graph if omitted
+  topology: star | lead-reviewer | pipeline | peer-mesh
+  enforcement: advisory | strict  # default: advisory
+
 members:
   - agent: string             # agent ID (references templates/agents/<id>.yaml)
     role: lead | specialist | reviewer
@@ -863,12 +979,13 @@ compatibility:                # optional version requirements
 
 ### Manifest (`malaclaw.yaml`)
 
-Created by `malaclaw init`. This is the project's desired state: which packs and skills you want installed.
+Created by `malaclaw init`. This is the project's desired state: which packs and skills you want installed, and which runtime to target.
 
 ```yaml
 version: 1
+runtime: openclaw | claude-code | codex | clawteam  # default: openclaw
 project:
-  id: string                # project namespace used in OpenClaw agent IDs
+  id: string                # project namespace used in agent IDs
   name: string
   description: string
   starter: string           # optional future starter/use-case source
@@ -1007,13 +1124,55 @@ malaclaw install --dry-run           # preview only, no lockfile write
 
 ---
 
+## Runtime Adapter Architecture
+
+`malaclaw` is a runtime-agnostic control plane. It provisions agents to different runtimes via adapters.
+
+```
+src/lib/adapters/
+├── base.ts              ← RuntimeProvisioner + RuntimeObserver interfaces
+├── registry.ts          ← getProvisioner(runtime) + getObserver(runtime)
+├── openclaw.ts          ← OpenClaw adapter (provision + observe via Gateway WS)
+├── claude-code.ts       ← Claude Code provisioner (generates CLAUDE.md)
+├── codex.ts             ← Codex provisioner (generates AGENTS.md)
+└── clawteam.ts          ← ClawTeam provisioner (team.toml) + observer (native state)
+```
+
+### Two-Path Observer Model
+
+1. **OpenClaw direct:** Gateway WebSocket → writes to `~/.malaclaw/agents/<id>/state.json`
+2. **ClawTeam-managed:** Reads `~/.clawteam/teams/*/` → writes to `~/.malaclaw/agents/<id>/state.json`
+
+Both paths normalize to the same `AgentTelemetry` schema. The dashboard reads only the normalized files.
+
+### Telemetry Schema
+
+```json
+{
+  "agentId": "store__proj__team__pm",
+  "runtime": "clawteam",
+  "status": "working",
+  "detail": "Research market trends",
+  "updatedAt": "2026-03-17T18:20:00Z",
+  "ttlSeconds": 300,
+  "source": "clawteam"
+}
+```
+
+**Status values:** `idle`, `working`, `error`, `offline`
+**Source values:** `gateway` (OpenClaw), `clawteam` (ClawTeam state), `heartbeat` (future), `manual` (install-time)
+
+---
+
 ## Extension Points And Roadmap
 
 | Feature | Where to add |
 |---|---|
 | Remote pack registry | `src/lib/resolver.ts` — add HTTP fetch before local lookup |
 | Custom templates directory | ✅ Done — set `MALACLAW_TEMPLATES` env var |
-| Claude Code adapter | `src/lib/adapters/claude-code.ts` — already stubbed |
+| Runtime adapters | ✅ Done — OpenClaw, Claude Code, Codex, ClawTeam |
+| Communication topologies | ✅ Done — star, lead-reviewer, pipeline, peer-mesh |
+| Agent telemetry | ✅ Done — normalized state.json across all runtimes |
 | Pack versioning + semver | `src/lib/resolver.ts` — extend `resolveManifest()` |
 | `malaclaw update` | New command — re-resolve + diff lockfile |
 | Dashboard UI | ✅ Done — `malaclaw dashboard` starts a Fastify + React web UI |
