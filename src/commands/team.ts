@@ -1,5 +1,6 @@
 import { loadTeam, loadAllTeams, loadAgent } from "../lib/loader.js";
 import { renderTeamGraph } from "../lib/team-graph.js";
+import { resolveTopology, getTopologyDescription } from "../lib/topology.js";
 import type { AgentDef } from "../lib/schema.js";
 
 export async function teamList(): Promise<void> {
@@ -46,6 +47,12 @@ export async function teamShow(teamId: string): Promise<void> {
 
   console.log("");
   console.log(renderTeamGraph(teamDef, agentMap));
+
+  const topology = resolveTopology(teamDef);
+  const desc = getTopologyDescription(topology);
+  const source = teamDef.communication ? "(explicit)" : "(inferred)";
+  console.log(`\nTopology: ${topology} ${source}`);
+  console.log(`  ${desc}`);
 
   if (teamDef.shared_memory) {
     console.log("\nShared Memory:");
