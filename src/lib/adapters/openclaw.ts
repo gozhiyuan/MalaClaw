@@ -19,6 +19,9 @@ import {
 } from "../paths.js";
 import { renderBootstrapFiles } from "../renderer.js";
 import type { AgentDef, TeamDef, TeamMember } from "../schema.js";
+import type { RuntimeProvisioner, RuntimeObserver, InstallTeamParams as BaseInstallTeamParams, InstallAction as BaseInstallAction } from "./base.js";
+import type { AgentTelemetry } from "../schema.js";
+import { readAllAgentTelemetry } from "../telemetry.js";
 
 // ── openclaw.json read/write ─────────────────────────────────────────────────
 
@@ -480,5 +483,45 @@ export async function uninstallTeam(
     } catch {
       // already gone
     }
+  }
+}
+
+// ── RuntimeProvisioner / RuntimeObserver class wrappers ──────────────────────
+
+export class OpenClawProvisioner implements RuntimeProvisioner {
+  readonly runtime = "openclaw" as const;
+
+  async installTeam(params: BaseInstallTeamParams): Promise<void> {
+    return installTeam(params as unknown as InstallTeamParams);
+  }
+
+  async uninstallTeam(projectId: string, teamId: string, workspaceRoot: string, agentIds?: string[]): Promise<void> {
+    return uninstallTeam(projectId, teamId, workspaceRoot, agentIds);
+  }
+
+  async planInstallTeam(params: BaseInstallTeamParams): Promise<BaseInstallAction[]> {
+    return planInstallTeam(params as unknown as InstallTeamParams);
+  }
+}
+
+export class OpenClawObserver implements RuntimeObserver {
+  readonly runtime = "openclaw" as const;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private ws: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private onEvent?: (event: { type: string; data: unknown }) => void;
+
+  async start(onEvent?: (event: { type: string; data: unknown }) => void): Promise<void> {
+    this.onEvent = onEvent;
+    // Don't actually connect in constructor — connection happens lazily via dashboard
+  }
+
+  async stop(): Promise<void> {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.ws = null;
+  }
+
+  async getAgentStatuses(): Promise<AgentTelemetry[]> {
+    return (await readAllAgentTelemetry()).filter((a) => a.runtime === "openclaw");
   }
 }
