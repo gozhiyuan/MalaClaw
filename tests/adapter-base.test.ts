@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { RuntimeProvisioner, RuntimeObserver } from "../src/lib/adapters/base.js";
 import { OpenClawProvisioner, OpenClawObserver } from "../src/lib/adapters/openclaw.js";
 import { ClaudeCodeProvisioner } from "../src/lib/adapters/claude-code.js";
+import { CodexProvisioner } from "../src/lib/adapters/codex.js";
 
 describe("RuntimeProvisioner interface", () => {
   it("can be implemented with required methods", () => {
@@ -54,5 +55,12 @@ describe("ClaudeCodeProvisioner", () => {
     expect(typeof p.installTeam).toBe("function");
     expect(typeof p.uninstallTeam).toBe("function");
     expect(typeof p.planInstallTeam).toBe("function");
+  });
+});
+
+describe("CodexProvisioner", () => {
+  it("implements RuntimeProvisioner with runtime='codex'", () => {
+    const p = new CodexProvisioner();
+    expect(p.runtime).toBe("codex");
   });
 });
