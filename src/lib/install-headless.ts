@@ -1,7 +1,6 @@
 import { loadManifest, writeLockfile } from "./loader.js";
 import { resolveManifest, type ResolvedPack } from "./resolver.js";
 import {
-  updateStoreGuidance,
   readOpenClawConfig,
   writeOpenClawConfig,
   addSkillsToAgentAllowlists,
@@ -230,12 +229,6 @@ export async function runHeadlessInstall(opts: InstallOpts): Promise<InstallResu
         source: "manual",
       });
     }
-  }
-
-  // Update main agent guidance (OpenClaw only)
-  if (runtime === "openclaw") {
-    opts.onProgress?.({ phase: "installing", message: "Updating main agent guidance (TOOLS.md, AGENTS.md)..." });
-    await updateStoreGuidance();
   }
 
   // Install skills into each agent workspace that lists them

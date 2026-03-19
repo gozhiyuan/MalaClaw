@@ -1,4 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { readOpenClawConfig, type OpenClawConfig } from "./adapters/openclaw.js";
+import { resolveMainAgentWorkspaceDir, resolveOpenClawStateDir } from "./paths.js";
 
 export type OpenClawAgentSource = "store-managed" | "openclaw-native" | "project-attached";
 
@@ -54,7 +57,28 @@ export function listAgentsFromConfig(config: OpenClawConfig): OpenClawAgentRecor
 export async function listOpenClawAgents(): Promise<OpenClawAgentRecord[]> {
   try {
     const { config } = await readOpenClawConfig();
-    return listAgentsFromConfig(config);
+    const records = listAgentsFromConfig(config);
+    const existingIds = new Set(records.map((record) => record.id));
+    const mainAgentDir = path.join(resolveOpenClawStateDir(), "agents", "main", "agent");
+
+    try {
+      await fs.access(mainAgentDir);
+      if (!existingIds.has("main")) {
+        records.push({
+          id: "main",
+          name: "Main",
+          workspace: typeof config.agents?.defaults?.workspace === "string"
+            ? config.agents.defaults.workspace
+            : resolveMainAgentWorkspaceDir(),
+          agentDir: mainAgentDir,
+          source: "openclaw-native",
+        });
+      }
+    } catch {
+      // no implicit main agent found on disk
+    }
+
+    return records.sort((a, b) => a.id.localeCompare(b.id));
   } catch {
     return [];
   }

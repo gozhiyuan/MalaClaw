@@ -1,6 +1,5 @@
 import { loadManifest, loadSkill } from "../lib/loader.js";
 import { resolveManifest, type ResolvedPack } from "../lib/resolver.js";
-import { updateStoreGuidance } from "../lib/adapters/openclaw.js";
 import type { InstallAction } from "../lib/adapters/base.js";
 import { getProvisioner } from "../lib/adapters/registry.js";
 import { resolveMainAgentWorkspaceDir } from "../lib/paths.js";
@@ -154,7 +153,6 @@ async function runZeroConfigInstall(opts: InstallOptions): Promise<void> {
     console.warn(`✗ Failed to install malaclaw-cook: ${reason}`);
     return;
   }
-  await updateStoreGuidance();
   console.log("The skill is now available in OpenClaw. Ask your agent to:");
   console.log("  1. Run: malaclaw starter list");
   console.log("  2. Pick a starter and run: malaclaw starter init <id> ./my-project");

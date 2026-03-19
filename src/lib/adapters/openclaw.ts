@@ -14,6 +14,7 @@ import path from "node:path";
 import JSON5 from "json5";
 import {
   resolveOpenClawConfigPath,
+  resolveOpenClawStateDir,
   resolveMainAgentWorkspaceDir,
   resolveAgentId,
 } from "../paths.js";
@@ -105,6 +106,14 @@ export function removeFromAllowlist(config: OpenClawConfig, agentIds: string[]):
 
 type AgentEntry = Record<string, unknown>;
 
+function resolvePrimaryModel(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && typeof (value as { primary?: unknown }).primary === "string") {
+    return (value as { primary: string }).primary;
+  }
+  return undefined;
+}
+
 function buildAgentEntry(
   agentId: string,
   agentDef: AgentDef,
@@ -122,6 +131,39 @@ function buildAgentEntry(
     entry.skills = agentDef.skills;
   }
   return entry;
+}
+
+async function discoverImplicitNativeAgentEntries(config: OpenClawConfig): Promise<AgentEntry[]> {
+  const existingIds = new Set(
+    Array.isArray(config.agents?.list)
+      ? config.agents.list
+        .map((entry) => (typeof entry.id === "string" ? entry.id : ""))
+        .filter(Boolean)
+      : [],
+  );
+
+  const mainAgentDir = path.join(resolveOpenClawStateDir(), "agents", "main", "agent");
+  try {
+    await fs.access(mainAgentDir);
+  } catch {
+    return [];
+  }
+
+  if (existingIds.has("main")) {
+    return [];
+  }
+
+  const model = resolvePrimaryModel(config.agents?.defaults?.model);
+  const entry: AgentEntry = {
+    id: "main",
+    name: "Main",
+    workspace: resolveMainWorkspaceDir(config),
+    agentDir: mainAgentDir,
+  };
+  if (model) {
+    entry.model = model;
+  }
+  return [entry];
 }
 
 export function addSkillsToAgentAllowlists(
@@ -378,7 +420,8 @@ export async function installTeam(params: InstallTeamParams): Promise<void> {
     }
   }
 
-  upsertAgentEntries(config, entries);
+  const implicitNativeEntries = await discoverImplicitNativeAgentEntries(config);
+  upsertAgentEntries(config, [...implicitNativeEntries, ...entries]);
   if (leadAgentIds.length > 0) {
     addToAllowlist(config, leadAgentIds);
   }
@@ -425,12 +468,6 @@ export function planInstallTeam(params: InstallTeamParams): InstallAction[] {
     type: "patch_config",
     path: resolveOpenClawConfigPath(),
     description: `Patch openclaw.json: add ${params.agents.length} agents to list`,
-  });
-
-  actions.push({
-    type: "update_guidance",
-    path: resolveMainAgentWorkspaceDir(),
-    description: "Update TOOLS.md and AGENTS.md with store guidance",
   });
 
   return actions;

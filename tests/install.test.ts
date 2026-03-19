@@ -121,6 +121,102 @@ describe("runInstall", () => {
     ).rejects.toThrow();
   });
 
+  it("preserves the implicit OpenClaw main agent when adding store-managed agents", async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ocs-install-"));
+    const projectDir = path.join(tmpDir, "project");
+    const storeDir = path.join(tmpDir, "store");
+    const stateDir = path.join(tmpDir, "state");
+    const homeDir = path.join(tmpDir, "home");
+    const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.mkdir(mainAgentDir, { recursive: true });
+    await fs.writeFile(path.join(mainAgentDir, "models.json"), JSON.stringify({ providers: {} }));
+    await fs.writeFile(path.join(mainAgentDir, "auth-profiles.json"), JSON.stringify({ version: 1, profiles: {} }));
+    await fs.writeFile(
+      path.join(projectDir, "malaclaw.yaml"),
+      stringify({ version: 1, packs: [{ id: "dev-company" }], skills: [] }),
+    );
+    await fs.writeFile(
+      path.join(stateDir, "openclaw.json"),
+      JSON.stringify({
+        agents: {
+          defaults: {
+            workspace: path.join(stateDir, "workspace"),
+            model: { primary: "openai-codex/gpt-5.4" },
+          },
+        },
+      }),
+    );
+
+    for (const key of envKeys) {
+      originalEnv.set(key, process.env[key]);
+    }
+    process.env.MALACLAW_DIR = storeDir;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+
+    await runInstall({ projectDir });
+
+    const openclawConfig = JSON.parse(await fs.readFile(path.join(stateDir, "openclaw.json"), "utf-8"));
+    const agentIds = openclawConfig.agents.list.map((entry: { id: string }) => entry.id);
+    expect(agentIds).toContain("main");
+    expect(agentIds).toContain("store__project__dev-company__pm");
+  });
+
+  it("does not rewrite the main OpenClaw workspace guidance files during install", async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ocs-install-"));
+    const projectDir = path.join(tmpDir, "project");
+    const storeDir = path.join(tmpDir, "store");
+    const stateDir = path.join(tmpDir, "state");
+    const homeDir = path.join(tmpDir, "home");
+    const mainAgentDir = path.join(stateDir, "agents", "main", "agent");
+    const mainWorkspace = path.join(stateDir, "workspace");
+    const originalTools = "# Custom TOOLS\n";
+    const originalAgents = "# Custom AGENTS\n";
+
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.mkdir(homeDir, { recursive: true });
+    await fs.mkdir(mainAgentDir, { recursive: true });
+    await fs.mkdir(mainWorkspace, { recursive: true });
+    await fs.writeFile(path.join(mainAgentDir, "models.json"), JSON.stringify({ providers: {} }));
+    await fs.writeFile(path.join(mainAgentDir, "auth-profiles.json"), JSON.stringify({ version: 1, profiles: {} }));
+    await fs.writeFile(path.join(mainWorkspace, "TOOLS.md"), originalTools);
+    await fs.writeFile(path.join(mainWorkspace, "AGENTS.md"), originalAgents);
+    await fs.writeFile(
+      path.join(projectDir, "malaclaw.yaml"),
+      stringify({ version: 1, packs: [{ id: "dev-company" }], skills: [] }),
+    );
+    await fs.writeFile(
+      path.join(stateDir, "openclaw.json"),
+      JSON.stringify({
+        agents: {
+          defaults: {
+            workspace: mainWorkspace,
+            model: { primary: "openai-codex/gpt-5.4" },
+          },
+        },
+      }),
+    );
+
+    for (const key of envKeys) {
+      originalEnv.set(key, process.env[key]);
+    }
+    process.env.MALACLAW_DIR = storeDir;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+
+    await runInstall({ projectDir });
+
+    await expect(fs.readFile(path.join(mainWorkspace, "TOOLS.md"), "utf-8")).resolves.toBe(originalTools);
+    await expect(fs.readFile(path.join(mainWorkspace, "AGENTS.md"), "utf-8")).resolves.toBe(originalAgents);
+  });
+
   it("installs targeted project skills into attached native OpenClaw agents", async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ocs-install-"));
     const projectDir = path.join(tmpDir, "project");
