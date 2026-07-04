@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add first-class `workflow:` support to `malaclaw.yaml` — Zod schema, semantic validation (stage owners, duplicate ids, input provenance), resolver integration, and `malaclaw validate` coverage. No execution engine yet (that is Milestone 2).
+**Goal:** Add first-class `workflow:` support to `malaclaw.yaml` — Zod schemas for normal stages and `foreach` item pipelines (nested steps, `max_parallel`), semantic validation (stage/step owners, duplicate ids, template-aware input provenance), resolver integration, and `malaclaw validate` coverage. No execution engine yet (that is Milestone 2).
 
 **Architecture:** Workflow schemas join the other Zod schemas in `src/lib/schema.ts` (repo convention: all data shapes live there). The parsed, default-applied `WorkflowDef` type IS the workflow IR — no separate IR layer. Semantic checks that need loaded templates (owner existence) live in a new `src/lib/workflow/validate.ts` module, which is the future home of the flow engine. `resolveManifest()` fails hard on workflow errors and surfaces warnings; `malaclaw validate` gains a project-manifest section.
 
@@ -21,7 +21,7 @@
 
 | File | Action | Responsibility |
 | --- | --- | --- |
-| `src/lib/schema.ts` | Modify | Add `WorkflowRetry`, `WorkflowStage`, `WorkflowDef` schemas; add `workflow:` to `Manifest` |
+| `src/lib/schema.ts` | Modify | Add `WorkflowRetry`, `WorkflowStep`, `StandardStage`, `ForeachStage`, `WorkflowStage` (union), `WorkflowDef` schemas; add `workflow:` to `Manifest` |
 | `src/lib/workflow/validate.ts` | Create | `validateWorkflowSemantics()` (owner/input checks), `matchesArtifact()` — pure, no I/O |
 | `src/lib/manifest-validate.ts` | Create | `validateProjectManifest()` — loads + resolves the project manifest (kept out of `workflow/validate.ts` to avoid a resolver import cycle) |
 | `src/lib/resolver.ts` | Modify | Validate workflow during `resolveManifest()`; add `workflow` + `workflowWarnings` to `ResolveResult` |
@@ -46,11 +46,18 @@ Create `tests/workflow-schema.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { WorkflowStage, WorkflowDef, Manifest } from "../src/lib/schema.js";
+import {
+  WorkflowStage,
+  WorkflowStep,
+  StandardStage,
+  ForeachStage,
+  WorkflowDef,
+  Manifest,
+} from "../src/lib/schema.js";
 
 describe("WorkflowStage schema", () => {
   it("parses a minimal stage and applies defaults", () => {
-    const stage = WorkflowStage.parse({ id: "intake", owner: "research-lead" });
+    const stage = StandardStage.parse({ id: "intake", owner: "research-lead" });
     expect(stage.inputs).toEqual([]);
     expect(stage.optional_inputs).toEqual([]);
     expect(stage.outputs).toEqual([]);
@@ -61,7 +68,7 @@ describe("WorkflowStage schema", () => {
   });
 
   it("parses a full stage", () => {
-    const stage = WorkflowStage.parse({
+    const stage = StandardStage.parse({
       id: "draft_sections",
       title: "Draft sections",
       owner: "chapter-writer",
@@ -71,16 +78,15 @@ describe("WorkflowStage schema", () => {
       validators: ["required_output_exists", "citation_markers_present"],
       requires_human_approval: true,
       retry: { max_attempts: 3 },
-      fanout_over: "outline.sections",
       max_rounds: 5,
       stop_when: "review_score >= 8.0",
     });
     expect(stage.retry?.max_attempts).toBe(3);
-    expect(stage.fanout_over).toBe("outline.sections");
+    expect(stage.max_rounds).toBe(5);
   });
 
   it("defaults retry.max_attempts to 2 when retry block is present but empty", () => {
-    const stage = WorkflowStage.parse({ id: "x", owner: "a", retry: {} });
+    const stage = StandardStage.parse({ id: "x", owner: "a", retry: {} });
     expect(stage.retry?.max_attempts).toBe(2);
   });
 
@@ -93,12 +99,101 @@ describe("WorkflowStage schema", () => {
   });
 
   it("rejects unknown keys (typo protection — silently stripping a typoed approval flag would drop a safety gate)", () => {
+    // Assert on StandardStage/WorkflowStep directly: union errors nest the
+    // per-member issues, so the message text is not reliable through the union.
+    expect(() =>
+      StandardStage.parse({ id: "outline", owner: "a", requiresHumanApproval: true }),
+    ).toThrow(/unrecognized key/i);
+    expect(() =>
+      StandardStage.parse({ id: "x", owner: "a", retry: { maxAttempts: 3 } }),
+    ).toThrow(/unrecognized key/i);
+    expect(() =>
+      WorkflowStep.parse({ id: "s", owner: "a", requiresHumanApproval: true }),
+    ).toThrow(/unrecognized key/i);
+    // Through the union it still throws, just with a nested message.
     expect(() =>
       WorkflowStage.parse({ id: "outline", owner: "a", requiresHumanApproval: true }),
-    ).toThrow(/unrecognized key/i);
+    ).toThrow();
+  });
+});
+
+describe("ForeachStage schema", () => {
+  it("parses a foreach stage with nested steps and applies defaults", () => {
+    const stage = ForeachStage.parse({
+      type: "foreach",
+      id: "chapter_pipeline",
+      foreach: "outline.chapters",
+      steps: [
+        { id: "draft", owner: "chapter-writer", outputs: ["chapters/{{item.id}}.md"] },
+        {
+          id: "review",
+          owner: "continuity-reviewer",
+          inputs: ["chapters/{{item.id}}.md"],
+          outputs: ["reviews/{{item.id}}.md"],
+        },
+      ],
+    });
+    expect(stage.item_name).toBe("item");
+    expect(stage.max_parallel).toBe(1);
+    expect(stage.steps[0].inputs).toEqual([]);
+    expect(stage.steps[0].optional_inputs).toEqual([]);
+  });
+
+  it("rejects a foreach stage with no steps", () => {
     expect(() =>
-      WorkflowStage.parse({ id: "x", owner: "a", retry: { maxAttempts: 3 } }),
+      ForeachStage.parse({ type: "foreach", id: "x", foreach: "outline.chapters", steps: [] }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate step ids within a foreach stage", () => {
+    expect(() =>
+      ForeachStage.parse({
+        type: "foreach",
+        id: "x",
+        foreach: "outline.chapters",
+        steps: [
+          { id: "draft", owner: "a" },
+          { id: "draft", owner: "b" },
+        ],
+      }),
+    ).toThrow(/duplicate step id/i);
+  });
+
+  it("rejects unknown keys on foreach stages", () => {
+    expect(() =>
+      ForeachStage.parse({
+        type: "foreach",
+        id: "x",
+        foreach: "y",
+        maxParallel: 4,
+        steps: [{ id: "s", owner: "a" }],
+      }),
     ).toThrow(/unrecognized key/i);
+  });
+
+  it("parses through WorkflowDef alongside normal stages", () => {
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "outline", owner: "outline-architect", outputs: ["outline.md", "outline.json"] },
+        {
+          type: "foreach",
+          id: "draft_sections",
+          foreach: "outline.sections",
+          item_name: "section",
+          max_parallel: 4,
+          steps: [
+            {
+              id: "draft",
+              owner: "chapter-writer",
+              inputs: ["outline.md"],
+              outputs: ["chapters/{{section.id}}.md"],
+            },
+          ],
+        },
+      ],
+    });
+    expect(wf.stages).toHaveLength(2);
+    expect(wf.max_parallel).toBe(2); // workflow-level global default
   });
 });
 
@@ -210,33 +305,75 @@ export const WorkflowRetry = z
   })
   .strict();
 
-export const WorkflowStage = z
+// Fields shared by normal stages and foreach inner steps.
+const workUnitFields = {
+  id: z.string().min(1),
+  title: z.string().optional(),
+  owner: z.string().min(1),
+  inputs: z.array(z.string()).default([]),
+  // Used if present, never required: exempt from the engine's input-existence
+  // check (future milestone) and from input-provenance warnings.
+  optional_inputs: z.array(z.string()).default([]),
+  outputs: z.array(z.string()).default([]),
+  tools: z.array(z.string()).default([]),
+  validators: z.array(z.string()).default([]),
+  requires_human_approval: z.boolean().default(false),
+  retry: WorkflowRetry.optional(),
+};
+
+// Inner step of a foreach item pipeline. Output paths may use {{item.id}}
+// templates — opaque strings here, resolved by the engine.
+export const WorkflowStep = z.object(workUnitFields).strict();
+
+export const StandardStage = z
   .object({
-    id: z.string().min(1),
-    title: z.string().optional(),
-    owner: z.string().min(1),
-    inputs: z.array(z.string()).default([]),
-    // Used if present, never required: exempt from the engine's input-existence
-    // check (future milestone) and from input-provenance warnings.
-    optional_inputs: z.array(z.string()).default([]),
-    outputs: z.array(z.string()).default([]),
-    tools: z.array(z.string()).default([]),
-    validators: z.array(z.string()).default([]),
-    requires_human_approval: z.boolean().default(false),
-    retry: WorkflowRetry.optional(),
-    fanout_over: z.string().optional(),
+    ...workUnitFields,
+    type: z.literal("stage").optional(),
     max_rounds: z.number().int().min(1).optional(),
     stop_when: z.string().optional(),
   })
   .strict();
 
+export const ForeachStage = z
+  .object({
+    type: z.literal("foreach"),
+    id: z.string().min(1),
+    title: z.string().optional(),
+    foreach: z.string().min(1), // path into an artifact, e.g. "outline.sections"
+    item_name: z.string().default("item"),
+    max_parallel: z.number().int().min(1).default(1),
+    steps: z.array(WorkflowStep).min(1),
+  })
+  .strict()
+  .superRefine((stage, ctx) => {
+    const seen = new Set<string>();
+    stage.steps.forEach((step, i) => {
+      if (seen.has(step.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["steps", i, "id"],
+          message: `Duplicate step id "${step.id}"`,
+        });
+      }
+      seen.add(step.id);
+    });
+  });
+
+// Not a discriminatedUnion: normal stages may omit `type`, and Zod v3
+// discriminated unions require the discriminator on every member. ForeachStage
+// is listed first but order does not affect correctness — strictness makes the
+// two shapes mutually exclusive.
+export const WorkflowStage = z.union([ForeachStage, StandardStage]);
+
 export const WorkflowDef = z
   .object({
     mode: z.string().optional(),
     artifact_type: z.string().optional(),
-    // Artifacts supplied by the user or environment (e.g. sources/bibliography.bib)
-    // rather than produced by a stage — exempt from input-provenance warnings.
+    // Artifacts supplied by the user or environment (expected to exist)
+    // rather than produced by a stage — exempt from provenance warnings.
     external_inputs: z.array(z.string()).default([]),
+    // Global cap on concurrently running foreach items across the workflow.
+    max_parallel: z.number().int().min(1).default(2),
     stages: z.array(WorkflowStage).min(1),
   })
   .strict()
@@ -255,6 +392,9 @@ export const WorkflowDef = z
   });
 
 export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
+export type WorkflowStep = z.infer<typeof WorkflowStep>;
+export type StandardStage = z.infer<typeof StandardStage>;
+export type ForeachStage = z.infer<typeof ForeachStage>;
 export type WorkflowStage = z.infer<typeof WorkflowStage>;
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 ```
@@ -328,6 +468,12 @@ describe("matchesArtifact", () => {
 
   it("does not match unrelated paths", () => {
     expect(matchesArtifact("outline.md", "sources/raw.jsonl")).toBe(false);
+  });
+
+  it("treats {{item}} templates as wildcards", () => {
+    expect(matchesArtifact("chapters/{{section.id}}.md", "chapters/chapter-01.md")).toBe(true);
+    expect(matchesArtifact("chapters/{{section.id}}.md", "chapters/*.md")).toBe(true);
+    expect(matchesArtifact("chapters/{{section.id}}.md", "reviews/chapter-01.md")).toBe(false);
   });
 });
 
@@ -413,6 +559,35 @@ describe("validateWorkflowSemantics", () => {
     const result = validateWorkflowSemantics(wf, owners);
     expect(result.warnings).toEqual([]);
   });
+
+  it("validates owners and provenance inside foreach steps", () => {
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "outline", owner: "research-lead", outputs: ["outline.json"] },
+        {
+          type: "foreach",
+          id: "chapters",
+          foreach: "outline.chapters",
+          steps: [
+            { id: "draft", owner: "chapter-writer", outputs: ["chapters/{{item.id}}.md"] },
+            {
+              id: "review",
+              owner: "ghost-reviewer",
+              inputs: ["chapters/{{item.id}}.md"],
+              outputs: ["reviews/{{item.id}}.md"],
+            },
+          ],
+        },
+      ],
+    });
+    const result = validateWorkflowSemantics(wf, owners);
+    // Unknown step owner is an error, labeled stage.step.
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('"chapters.review"');
+    expect(result.errors[0]).toContain('"ghost-reviewer"');
+    // The draft step's templated output satisfies the review step's input.
+    expect(result.warnings).toEqual([]);
+  });
 });
 ```
 
@@ -426,7 +601,7 @@ Expected: FAIL — cannot resolve `../src/lib/workflow/validate.js`.
 Create `src/lib/workflow/validate.ts`:
 
 ```ts
-import type { WorkflowDef } from "../schema.js";
+import type { WorkflowDef, WorkflowStage } from "../schema.js";
 
 export type WorkflowValidationResult = {
   errors: string[];
@@ -437,15 +612,40 @@ function escapeRegex(s: string): string {
   return s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function globToRegex(pattern: string): RegExp {
-  return new RegExp("^" + pattern.split("*").map(escapeRegex).join(".*") + "$");
+/** Convert an artifact pattern to a regex. Both `*` globs and `{{item.id}}`
+ *  templates match arbitrary path content. */
+function patternToRegex(pattern: string): RegExp {
+  const wildcarded = pattern.replace(/\{\{[^}]+\}\}/g, "*");
+  return new RegExp("^" + wildcarded.split("*").map(escapeRegex).join(".*") + "$");
 }
 
 /** True when a produced artifact path satisfies a declared input path.
- *  Either side may contain `*` globs (e.g. `chapters/*.md`). */
+ *  Either side may contain `*` globs or `{{...}}` templates. */
 export function matchesArtifact(produced: string, input: string): boolean {
   if (produced === input) return true;
-  return globToRegex(produced).test(input) || globToRegex(input).test(produced);
+  return patternToRegex(produced).test(input) || patternToRegex(input).test(produced);
+}
+
+type WorkUnit = {
+  label: string;
+  owner: string;
+  inputs: string[];
+  outputs: string[];
+};
+
+/** Flatten a stage into ordered work units. Foreach steps keep their declared
+ *  order, so within an item pipeline earlier steps' outputs count as produced
+ *  for later steps' inputs. */
+function toWorkUnits(stage: WorkflowStage): WorkUnit[] {
+  if ("steps" in stage) {
+    return stage.steps.map((step) => ({
+      label: `${stage.id}.${step.id}`,
+      owner: step.owner,
+      inputs: step.inputs,
+      outputs: step.outputs,
+    }));
+  }
+  return [{ label: stage.id, owner: stage.owner, inputs: stage.inputs, outputs: stage.outputs }];
 }
 
 /** Semantic checks that need resolved context (schema-shape checks live in Zod).
@@ -460,19 +660,21 @@ export function validateWorkflowSemantics(
   const producedOutputs: string[] = [...workflow.external_inputs];
 
   for (const stage of workflow.stages) {
-    if (!availableOwnerIds.has(stage.owner)) {
-      errors.push(
-        `Stage "${stage.id}": owner "${stage.owner}" is not an agent in any selected team or attached agent`,
-      );
-    }
-    for (const input of stage.inputs) {
-      if (!producedOutputs.some((out) => matchesArtifact(out, input))) {
-        warnings.push(
-          `Stage "${stage.id}": input "${input}" is not produced by any earlier stage (fine if it is user-provided)`,
+    for (const unit of toWorkUnits(stage)) {
+      if (!availableOwnerIds.has(unit.owner)) {
+        errors.push(
+          `Stage "${unit.label}": owner "${unit.owner}" is not an agent in any selected team or attached agent`,
         );
       }
+      for (const input of unit.inputs) {
+        if (!producedOutputs.some((out) => matchesArtifact(out, input))) {
+          warnings.push(
+            `Stage "${unit.label}": input "${input}" is not produced by any earlier stage (fine if it is user-provided)`,
+          );
+        }
+      }
+      producedOutputs.push(...unit.outputs);
     }
-    producedOutputs.push(...stage.outputs);
   }
 
   return { errors, warnings };
@@ -521,6 +723,7 @@ describe("resolveManifest with workflow", () => {
         skills: [],
         workflow: {
           external_inputs: [],
+          max_parallel: 2,
           stages: [
             { id: "plan", owner: "pm", inputs: [], optional_inputs: [], outputs: ["plan.md"], tools: [], validators: [], requires_human_approval: false },
             { id: "build", owner: "tech-lead", inputs: ["plan.md"], optional_inputs: [], outputs: ["src/*.ts"], tools: [], validators: [], requires_human_approval: false },
@@ -543,6 +746,7 @@ describe("resolveManifest with workflow", () => {
         skills: [],
         workflow: {
           external_inputs: [],
+          max_parallel: 2,
           stages: [
             { id: "build", owner: "tech-lead", inputs: ["plan.md"], optional_inputs: [], outputs: [], tools: [], validators: [], requires_human_approval: false },
           ],
@@ -564,8 +768,48 @@ describe("resolveManifest with workflow", () => {
           skills: [],
           workflow: {
             external_inputs: [],
+            max_parallel: 2,
             stages: [
               { id: "plan", owner: "ghost-writer", inputs: [], optional_inputs: [], outputs: [], tools: [], validators: [], requires_human_approval: false },
+            ],
+          },
+        },
+        { projectDir: "/tmp/acme-web" },
+      ),
+    ).rejects.toThrow(/ghost-writer/);
+  });
+
+  it("validates owners inside foreach steps", async () => {
+    await expect(
+      resolveManifest(
+        {
+          version: 1,
+          runtime: "openclaw",
+          packs: [{ id: "dev-company" }],
+          skills: [],
+          workflow: {
+            external_inputs: [],
+            max_parallel: 2,
+            stages: [
+              {
+                type: "foreach",
+                id: "items",
+                foreach: "outline.sections",
+                item_name: "item",
+                max_parallel: 2,
+                steps: [
+                  {
+                    id: "draft",
+                    owner: "ghost-writer",
+                    inputs: [],
+                    optional_inputs: [],
+                    outputs: [],
+                    tools: [],
+                    validators: [],
+                    requires_human_approval: false,
+                  },
+                ],
+              },
             ],
           },
         },
@@ -793,6 +1037,35 @@ workflow:
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
+  it("accepts a manifest with a foreach stage", async () => {
+    const dir = await makeProject(`
+version: 1
+packs:
+  - id: dev-company
+workflow:
+  stages:
+    - id: outline
+      owner: pm
+      outputs:
+        - outline.json
+    - id: draft_items
+      type: foreach
+      foreach: outline.sections
+      max_parallel: 4
+      steps:
+        - id: draft
+          owner: tech-lead
+          inputs:
+            - outline.json
+          outputs:
+            - chapters/{{item.id}}.md
+`);
+    const result = await validateProjectManifest(dir);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
   it("surfaces provenance warnings for a valid manifest", async () => {
     const dir = await makeProject(`
 version: 1
@@ -965,7 +1238,7 @@ git commit -m "feat: validate project manifest (including workflow) in malaclaw 
 In `CLAUDE.md`, in the "Schema Reference (src/lib/schema.ts)" table, add after the `Manifest` row:
 
 ```markdown
-| `WorkflowDef` | `malaclaw.yaml` `workflow:` | Stage-based workflow IR: stages, owners, artifacts, validators, approval gates (no execution engine yet) |
+| `WorkflowDef` | `malaclaw.yaml` `workflow:` | Stage-based workflow IR: normal stages + foreach item pipelines, owners, artifacts, validators, approval gates, parallelism caps (no execution engine yet) |
 ```
 
 - [ ] **Step 2: Add a README feature-table row**
