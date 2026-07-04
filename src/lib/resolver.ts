@@ -13,7 +13,9 @@ import type {
   AgentDef,
   TeamDef,
   SkillEntry,
+  WorkflowDef,
 } from "./schema.js";
+import { validateWorkflowSemantics } from "./workflow/validate.js";
 import { resolveProjectMeta, type ResolvedProjectMeta } from "./project-meta.js";
 
 export type ResolvedAgent = {
@@ -45,6 +47,8 @@ export type ResolveResult = {
   project: ResolvedProjectMeta;
   packs: ResolvedPack[];
   skills: ResolvedSkill[];
+  workflow?: WorkflowDef;
+  workflowWarnings: string[];
   lockfile: Lockfile;
 };
 
@@ -125,6 +129,26 @@ export async function resolveManifest(
     }
   }
 
+  // Validate workflow against resolved agents
+  let workflow: WorkflowDef | undefined;
+  const workflowWarnings: string[] = [];
+  if (manifest.workflow) {
+    const ownerIds = new Set<string>();
+    for (const pack of packs) {
+      for (const agent of pack.agents) ownerIds.add(agent.agentDef.id);
+    }
+    for (const attached of project.attachedAgents) ownerIds.add(attached);
+
+    const { errors, warnings } = validateWorkflowSemantics(manifest.workflow, ownerIds);
+    if (errors.length > 0) {
+      throw new Error(
+        `Workflow validation failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+      );
+    }
+    workflowWarnings.push(...warnings);
+    workflow = manifest.workflow;
+  }
+
   // Build lockfile
   const lockfile: Lockfile = {
     version: 1,
@@ -134,7 +158,7 @@ export async function resolveManifest(
     skills: skills.map((s) => buildLockedSkill(s)),
   };
 
-  return { project, packs, skills, lockfile };
+  return { project, packs, skills, workflow, workflowWarnings, lockfile };
 }
 
 function buildLockedProject(project: ResolvedProjectMeta): LockedProject {
