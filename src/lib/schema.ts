@@ -232,6 +232,113 @@ export const DemoProjectIndex = z.object({
 export type DemoProjectDef = z.infer<typeof DemoProjectDef>;
 export type DemoProjectIndex = z.infer<typeof DemoProjectIndex>;
 
+// ── Workflow definition (malaclaw.yaml workflow:) ───────────────────────────
+// The parsed, default-applied WorkflowDef is the framework-neutral workflow IR.
+// Execution semantics (engine, WorkerRuntime) arrive in a later milestone.
+//
+// These schemas are .strict() — unlike the rest of this file — because workflow
+// YAML is user-edited and a silently-stripped typo (requiresHumanApproval,
+// maxAttempts) could drop an approval gate. Fail closed on unknown keys.
+
+export const WorkflowRetry = z
+  .object({
+    max_attempts: z.number().int().min(1).max(10).default(2),
+  })
+  .strict();
+
+// Fields shared by normal stages and foreach inner steps.
+const workUnitFields = {
+  id: z.string().min(1),
+  title: z.string().optional(),
+  owner: z.string().min(1),
+  inputs: z.array(z.string()).default([]),
+  // Used if present, never required: exempt from the engine's input-existence
+  // check (future milestone) and from input-provenance warnings.
+  optional_inputs: z.array(z.string()).default([]),
+  outputs: z.array(z.string()).default([]),
+  tools: z.array(z.string()).default([]),
+  validators: z.array(z.string()).default([]),
+  requires_human_approval: z.boolean().default(false),
+  retry: WorkflowRetry.optional(),
+};
+
+// Inner step of a foreach item pipeline. Output paths may use {{item.id}}
+// templates — opaque strings here, resolved by the engine.
+export const WorkflowStep = z.object(workUnitFields).strict();
+
+export const StandardStage = z
+  .object({
+    ...workUnitFields,
+    type: z.literal("stage").optional(),
+    max_rounds: z.number().int().min(1).optional(),
+    stop_when: z.string().optional(),
+  })
+  .strict();
+
+export const ForeachStage = z
+  .object({
+    type: z.literal("foreach"),
+    id: z.string().min(1),
+    title: z.string().optional(),
+    foreach: z.string().min(1), // path into an artifact, e.g. "outline.sections"
+    item_name: z.string().default("item"),
+    max_parallel: z.number().int().min(1).default(1),
+    steps: z.array(WorkflowStep).min(1),
+  })
+  .strict()
+  .superRefine((stage, ctx) => {
+    const seen = new Set<string>();
+    stage.steps.forEach((step, i) => {
+      if (seen.has(step.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["steps", i, "id"],
+          message: `Duplicate step id "${step.id}"`,
+        });
+      }
+      seen.add(step.id);
+    });
+  });
+
+// Not a discriminatedUnion: normal stages may omit `type`, and Zod v3
+// discriminated unions require the discriminator on every member. ForeachStage
+// is listed first but order does not affect correctness — strictness makes the
+// two shapes mutually exclusive.
+export const WorkflowStage = z.union([ForeachStage, StandardStage]);
+
+export const WorkflowDef = z
+  .object({
+    mode: z.string().optional(),
+    artifact_type: z.string().optional(),
+    // Artifacts supplied by the user or environment (expected to exist)
+    // rather than produced by a stage — exempt from provenance warnings.
+    external_inputs: z.array(z.string()).default([]),
+    // Global cap on concurrently running foreach items across the workflow.
+    max_parallel: z.number().int().min(1).default(2),
+    stages: z.array(WorkflowStage).min(1),
+  })
+  .strict()
+  .superRefine((wf, ctx) => {
+    const seen = new Set<string>();
+    wf.stages.forEach((stage, i) => {
+      if (seen.has(stage.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["stages", i, "id"],
+          message: `Duplicate stage id "${stage.id}"`,
+        });
+      }
+      seen.add(stage.id);
+    });
+  });
+
+export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
+export type WorkflowStep = z.infer<typeof WorkflowStep>;
+export type StandardStage = z.infer<typeof StandardStage>;
+export type ForeachStage = z.infer<typeof ForeachStage>;
+export type WorkflowStage = z.infer<typeof WorkflowStage>;
+export type WorkflowDef = z.infer<typeof WorkflowDef>;
+
 // ── Project manifest (malaclaw.yaml) ───────────────────────────────────
 
 export const ManifestProject = z.object({
@@ -267,6 +374,7 @@ export const Manifest = z.object({
   project: ManifestProject.optional(),
   packs: z.array(ManifestPackRef).optional().default([]),
   skills: z.array(ManifestSkillRef).optional().default([]),
+  workflow: WorkflowDef.optional(),
 });
 
 export type Manifest = z.infer<typeof Manifest>;
