@@ -52,6 +52,7 @@ describe("WorkflowStage schema", () => {
   it("parses a minimal stage and applies defaults", () => {
     const stage = WorkflowStage.parse({ id: "intake", owner: "research-lead" });
     expect(stage.inputs).toEqual([]);
+    expect(stage.optional_inputs).toEqual([]);
     expect(stage.outputs).toEqual([]);
     expect(stage.tools).toEqual([]);
     expect(stage.validators).toEqual([]);
@@ -215,6 +216,9 @@ export const WorkflowStage = z
     title: z.string().optional(),
     owner: z.string().min(1),
     inputs: z.array(z.string()).default([]),
+    // Used if present, never required: exempt from the engine's input-existence
+    // check (future milestone) and from input-provenance warnings.
+    optional_inputs: z.array(z.string()).default([]),
     outputs: z.array(z.string()).default([]),
     tools: z.array(z.string()).default([]),
     validators: z.array(z.string()).default([]),
@@ -377,7 +381,7 @@ describe("validateWorkflowSemantics", () => {
   it("does not treat a stage's own outputs as available inputs", () => {
     const wf = WorkflowDef.parse({
       stages: [
-        { id: "revise", owner: "chapter-writer", inputs: ["chapters/*.md"], outputs: ["chapters/*.md"] },
+        { id: "revise", owner: "chapter-writer", inputs: ["chapters/*.md"], optional_inputs: [], outputs: ["chapters/*.md"] },
       ],
     });
     const result = validateWorkflowSemantics(wf, owners);
@@ -389,6 +393,21 @@ describe("validateWorkflowSemantics", () => {
       external_inputs: ["sources/bibliography.bib"],
       stages: [
         { id: "build", owner: "chapter-writer", inputs: ["sources/bibliography.bib"] },
+      ],
+    });
+    const result = validateWorkflowSemantics(wf, owners);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("never warns about optional_inputs (used if present, never required)", () => {
+    const wf = WorkflowDef.parse({
+      stages: [
+        {
+          id: "build",
+          owner: "chapter-writer",
+          inputs: [],
+          optional_inputs: ["sources/bibliography.bib"],
+        },
       ],
     });
     const result = validateWorkflowSemantics(wf, owners);
@@ -503,8 +522,8 @@ describe("resolveManifest with workflow", () => {
         workflow: {
           external_inputs: [],
           stages: [
-            { id: "plan", owner: "pm", inputs: [], outputs: ["plan.md"], tools: [], validators: [], requires_human_approval: false },
-            { id: "build", owner: "tech-lead", inputs: ["plan.md"], outputs: ["src/*.ts"], tools: [], validators: [], requires_human_approval: false },
+            { id: "plan", owner: "pm", inputs: [], optional_inputs: [], outputs: ["plan.md"], tools: [], validators: [], requires_human_approval: false },
+            { id: "build", owner: "tech-lead", inputs: ["plan.md"], optional_inputs: [], outputs: ["src/*.ts"], tools: [], validators: [], requires_human_approval: false },
           ],
         },
       },
@@ -525,7 +544,7 @@ describe("resolveManifest with workflow", () => {
         workflow: {
           external_inputs: [],
           stages: [
-            { id: "build", owner: "tech-lead", inputs: ["plan.md"], outputs: [], tools: [], validators: [], requires_human_approval: false },
+            { id: "build", owner: "tech-lead", inputs: ["plan.md"], optional_inputs: [], outputs: [], tools: [], validators: [], requires_human_approval: false },
           ],
         },
       },
@@ -546,7 +565,7 @@ describe("resolveManifest with workflow", () => {
           workflow: {
             external_inputs: [],
             stages: [
-              { id: "plan", owner: "ghost-writer", inputs: [], outputs: [], tools: [], validators: [], requires_human_approval: false },
+              { id: "plan", owner: "ghost-writer", inputs: [], optional_inputs: [], outputs: [], tools: [], validators: [], requires_human_approval: false },
             ],
           },
         },
