@@ -1273,8 +1273,9 @@ git commit -m "docs: document workflow schema support"
 
 ## Out of Scope (later milestones)
 
-- Flow engine, state files, events, checkpoints (Milestone 2, with DryRunRuntime).
-- `WorkerRuntime` interface and claude-code/codex implementations (Milestone 3).
-- `manuscript-writing` pack, writing agents/teams, LongWrite CLI, planner skill (Milestone 4 — LongWrite repo).
+- Flow engine, state files, events, checkpoints, scheduler, review queue (Milestone 2, with DryRunRuntime).
+- **Runtime/model option fields, model tiers, budget limits, fallback-chain schema: explicitly deferred to Milestone 2.** They co-design with the scheduler and `StageRunResult` outcome classification that consume them; adding them to these strict schemas now would lock in shapes before the engine exists. (Per the status review's stated alternative for its M1 list.)
+- `WorkerRuntime` interface and claude-code/codex implementations, noninteractive permission behavior (Milestone 7 per the revised spec roadmap).
+- `manuscript-writing` pack, writing agents/teams, LongWrite CLI, planner skill, mode compiler (Milestone 3 — LongWrite repo).
 - Rendering workflow guidance into agent workspace files.
 - Lockfile changes: the lockfile intentionally does not record the workflow yet; the engine milestone decides what resolved-workflow state belongs there.
