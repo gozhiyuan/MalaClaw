@@ -260,6 +260,12 @@ malaclaw starter suggest "<idea>"
 malaclaw starter show <id>
 malaclaw starter init <id> <dir>
 
+# workflow flows
+malaclaw flow run
+malaclaw flow status
+malaclaw flow approve <id>
+malaclaw flow report
+
 # manifests, teams, agents, and skills
 malaclaw init
 malaclaw project list

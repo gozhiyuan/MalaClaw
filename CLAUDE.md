@@ -35,6 +35,9 @@ malaclaw/
 │       ├── skill-fetch.ts  ← Skill caching and symlinking
 │       ├── team-graph.ts   ← Team delegation graph utilities
 │       ├── workflow-mode.ts← Detect managed vs Claude Code vs OpenClaw vs unconfigured mode
+│       ├── manifest-validate.ts ← validateProjectManifest() for `malaclaw validate`
+│       ├── workflow/       ← Flow engine: validate, state, engine, prompt, validators
+│       │   └── runtimes/   ← WorkerRuntime contract, registry, DryRunRuntime
 │       ├── openclaw-agents.ts ← Discover native OpenClaw agents from openclaw.json
 │       ├── openclaw-skills.ts ← Discover native OpenClaw skills for skill sync
 │       └── adapters/
