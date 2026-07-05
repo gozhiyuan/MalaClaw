@@ -1,4 +1,5 @@
 import { loadAllAgents, loadAllTeams, loadAllSkills, loadAllPacks } from "../lib/loader.js";
+import { validateProjectManifest } from "../lib/manifest-validate.js";
 import { ZodError } from "zod";
 
 type ValidationResult = {
@@ -29,6 +30,11 @@ export async function runValidate(): Promise<void> {
     }
   }
 
+  const manifest = await validateProjectManifest();
+  if (manifest.found) {
+    results.push({ file: "malaclaw.yaml", ok: manifest.ok, errors: manifest.errors });
+  }
+
   let allOk = true;
   for (const r of results) {
     if (r.ok) {
@@ -38,6 +44,10 @@ export async function runValidate(): Promise<void> {
       console.log(`✗ ${r.file}`);
       for (const e of r.errors) console.log(`    ${e}`);
     }
+  }
+
+  for (const w of manifest.warnings) {
+    console.log(`⚠ malaclaw.yaml: ${w}`);
   }
 
   if (!allOk) {
