@@ -265,6 +265,8 @@ malaclaw flow run
 malaclaw flow status
 malaclaw flow approve <id>
 malaclaw flow report
+malaclaw flow review --batch
+malaclaw flow continue
 
 # manifests, teams, agents, and skills
 malaclaw init
