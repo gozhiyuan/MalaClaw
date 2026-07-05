@@ -12,6 +12,7 @@ import {
   type FlowState,
 } from "./state.js";
 import { expandForeachItems, resolveItemTemplates } from "./foreach.js";
+import { resolveWithin } from "./safe-paths.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
 import type { StageRunResult, WorkerRuntime } from "./runtimes/base.js";
@@ -80,10 +81,12 @@ async function checkpointOutputs(workspaceDir: string, unitKey: string, outputs:
   const existing: string[] = [];
   for (const output of concreteOutputs(outputs)) {
     try {
-      await fs.access(path.join(workspaceDir, output));
+      // resolveWithin guards against traversal (schema forbids it; item ids
+      // are validated at expansion — this is defense in depth).
+      await fs.access(resolveWithin(workspaceDir, output));
       existing.push(output);
     } catch {
-      // nothing to checkpoint
+      // nothing to checkpoint (or unsafe path — never copied)
     }
   }
   if (existing.length === 0) return;
@@ -92,16 +95,16 @@ async function checkpointOutputs(workspaceDir: string, unitKey: string, outputs:
     `${new Date().toISOString().replace(/[:.]/g, "-")}-${unitKey}`,
   );
   for (const output of existing) {
-    const dest = path.join(dir, output);
+    const dest = resolveWithin(dir, output);
     await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.copyFile(path.join(workspaceDir, output), dest);
+    await fs.copyFile(resolveWithin(workspaceDir, output), dest);
   }
 }
 
 async function writeBlocker(
   workspaceDir: string, unitKey: string, result: StageRunResult,
 ): Promise<void> {
-  const reportPath = path.join(workspaceDir, "reports", `${unitKey}-blocker.md`);
+  const reportPath = resolveWithin(path.join(workspaceDir, "reports"), `${unitKey}-blocker.md`);
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
   await fs.writeFile(
     reportPath,
@@ -153,7 +156,7 @@ async function runUnit(
 
     const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
-    const promptPath = path.join(promptsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.md`);
+    const promptPath = resolveWithin(promptsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.md`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
     let result = await runtime.runStage({

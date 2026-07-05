@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { StageRunOutcome } from "../../schema.js";
+import { resolveWithin } from "../safe-paths.js";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
 
 export type DryRunOptions = {
@@ -39,8 +40,9 @@ export class DryRunRuntime implements WorkerRuntime {
 
     const produced: string[] = [];
     for (const output of req.outputs) {
-      if (!isConcrete(output)) continue; // foreach templates arrive in M2b
-      const filePath = path.join(req.workspaceDir, output);
+      if (!isConcrete(output)) continue; // unresolved templates/globs are never written
+      // Never write outside the workspace, whatever the manifest says.
+      const filePath = resolveWithin(req.workspaceDir, output);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       const content =
         this.fixtures[output] ??

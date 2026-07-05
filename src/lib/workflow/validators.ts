@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import path from "node:path";
+import { resolveWithin } from "./safe-paths.js";
 
 export type ValidatorReport = {
   pass: boolean;
@@ -10,6 +10,15 @@ type ValidatorFn = (outputs: string[], workspaceDir: string) => Promise<string[]
 
 function concreteOutputs(outputs: string[]): string[] {
   return outputs.filter((o) => !o.includes("*") && !o.includes("{{"));
+}
+
+// Unsafe paths resolve to "" and read as missing — fail closed.
+function safeJoin(workspaceDir: string, output: string): string {
+  try {
+    return resolveWithin(workspaceDir, output);
+  } catch {
+    return "";
+  }
 }
 
 async function readIfExists(filePath: string): Promise<string | null> {
@@ -24,7 +33,7 @@ const builtins: Record<string, ValidatorFn> = {
   async required_output_exists(outputs, workspaceDir) {
     const findings: string[] = [];
     for (const output of concreteOutputs(outputs)) {
-      if ((await readIfExists(path.join(workspaceDir, output))) === null) {
+      if ((await readIfExists(safeJoin(workspaceDir, output))) === null) {
         findings.push(`required_output_exists: "${output}" was not produced`);
       }
     }
@@ -34,7 +43,7 @@ const builtins: Record<string, ValidatorFn> = {
   async non_empty_markdown(outputs, workspaceDir) {
     const findings: string[] = [];
     for (const output of concreteOutputs(outputs).filter((o) => o.endsWith(".md"))) {
-      const content = await readIfExists(path.join(workspaceDir, output));
+      const content = await readIfExists(safeJoin(workspaceDir, output));
       if (content === null || content.trim().length === 0) {
         findings.push(`non_empty_markdown: "${output}" is missing or empty`);
       }
@@ -45,7 +54,7 @@ const builtins: Record<string, ValidatorFn> = {
   async jsonl_parseable(outputs, workspaceDir) {
     const findings: string[] = [];
     for (const output of concreteOutputs(outputs).filter((o) => o.endsWith(".jsonl"))) {
-      const content = await readIfExists(path.join(workspaceDir, output));
+      const content = await readIfExists(safeJoin(workspaceDir, output));
       if (content === null) {
         findings.push(`jsonl_parseable: "${output}" was not produced`);
         continue;

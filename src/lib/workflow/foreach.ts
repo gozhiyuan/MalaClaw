@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ForeachStage } from "../schema.js";
+import { SAFE_ITEM_ID_PATTERN } from "./safe-paths.js";
 
 /** Replace item-id templates with the concrete item id before a runtime sees paths. */
 export function resolveItemTemplates(text: string, itemName: string, itemId: string): string {
@@ -42,6 +43,13 @@ export async function expandForeachItems(stage: ForeachStage, workspaceDir: stri
     const id = (entry as Record<string, unknown>)?.id;
     if (typeof id !== "string" || id.length === 0) {
       throw new Error(`Foreach stage "${stage.id}": every "${key}" entry needs a string id`);
+    }
+    // Item ids are worker-produced (untrusted) and flow into file paths via
+    // {{item.id}} templates — reject anything that isn't a safe filename part.
+    if (!SAFE_ITEM_ID_PATTERN.test(id)) {
+      throw new Error(
+        `Foreach stage "${stage.id}": item id "${id}" is not a safe id (letters, digits, . _ - only)`,
+      );
     }
     ids.push(id);
   }

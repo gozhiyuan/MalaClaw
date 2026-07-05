@@ -1,4 +1,16 @@
 import { z } from "zod";
+import { isSafeWorkspacePath, SAFE_ID_PATTERN } from "./workflow/safe-paths.js";
+
+// Workflow ids become unit keys and filenames (prompts, blockers, checkpoints);
+// artifact paths are joined with the workspace dir. Both must be path-safe.
+const workflowId = z.string().regex(
+  SAFE_ID_PATTERN,
+  "must start alphanumeric and contain only letters, digits, _ or - (ids become filenames)",
+);
+const workspacePath = z.string().refine(
+  isSafeWorkspacePath,
+  "must be a relative path inside the workspace (no absolute paths or .. segments)",
+);
 
 // ── Capability model ─────────────────────────────────────────────────────────
 
@@ -285,14 +297,14 @@ export const RuntimePolicy = z
 
 // Fields shared by normal stages and foreach inner steps.
 const workUnitFields = {
-  id: z.string().min(1),
+  id: workflowId,
   title: z.string().optional(),
   owner: z.string().min(1),
-  inputs: z.array(z.string()).default([]),
+  inputs: z.array(workspacePath).default([]),
   // Used if present, never required: exempt from the engine's input-existence
   // check (future milestone) and from input-provenance warnings.
-  optional_inputs: z.array(z.string()).default([]),
-  outputs: z.array(z.string()).default([]),
+  optional_inputs: z.array(workspacePath).default([]),
+  outputs: z.array(workspacePath).default([]),
   tools: z.array(z.string()).default([]),
   validators: z.array(z.string()).default([]),
   requires_human_approval: z.boolean().default(false),
@@ -320,7 +332,7 @@ export const StandardStage = z
 export const ForeachStage = z
   .object({
     type: z.literal("foreach"),
-    id: z.string().min(1),
+    id: workflowId,
     title: z.string().optional(),
     foreach: z.string().min(1), // path into an artifact, e.g. "outline.sections"
     item_name: z.string().default("item"),
@@ -354,7 +366,7 @@ export const WorkflowDef = z
     artifact_type: z.string().optional(),
     // Artifacts supplied by the user or environment (expected to exist)
     // rather than produced by a stage — exempt from provenance warnings.
-    external_inputs: z.array(z.string()).default([]),
+    external_inputs: z.array(workspacePath).default([]),
     // Global cap on concurrently running foreach items across the workflow.
     max_parallel: z.number().int().min(1).default(2),
     runtime_policy: RuntimePolicy.optional(),
