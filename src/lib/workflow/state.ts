@@ -11,12 +11,15 @@ export const UnitState = z.object({
   lastError: z.string().optional(),
   requestedRuntime: z.string().optional(),
   actualRuntime: z.string().optional(),
+  approvalGranted: z.boolean().default(false),
 });
 export type UnitState = z.infer<typeof UnitState>;
 
 export const PendingApproval = z.object({
   id: z.string(),
   stageId: z.string(),
+  stepId: z.string().optional(),
+  itemId: z.string().optional(),
   artifacts: z.array(z.string()).default([]),
 });
 export type PendingApproval = z.infer<typeof PendingApproval>;
@@ -34,6 +37,7 @@ export const FlowState = z.object({
   ]).default("idle"),
   units: z.record(UnitState),
   pendingApprovals: z.array(PendingApproval).default([]),
+  foreachItems: z.record(z.array(z.string())).default({}),
   updatedAt: z.string(),
 });
 export type FlowState = z.infer<typeof FlowState>;
@@ -65,7 +69,6 @@ export function workflowHash(workflow: WorkflowDef): string {
 export async function initFlowState(workflow: WorkflowDef, workspaceDir: string): Promise<FlowState> {
   const units: Record<string, UnitState> = {};
   for (const stage of workflow.stages) {
-    // M2a: sequential stages only; foreach expansion arrives in M2b.
     units[stage.id] = UnitState.parse({});
   }
   const state: FlowState = FlowState.parse({

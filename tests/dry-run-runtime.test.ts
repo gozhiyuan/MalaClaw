@@ -72,6 +72,16 @@ describe("DryRunRuntime", () => {
     expect(result.outcome).toBe("success");
     expect(result.producedFiles).toEqual(["plan.md"]);
   });
+
+  it("writes a deterministic items fixture for .json outputs", async () => {
+    const ws = await makeWorkspace();
+    const rt = new DryRunRuntime();
+    await rt.runStage(request(ws, { outputs: ["outline.json"] }));
+    const parsed = JSON.parse(await fs.readFile(path.join(ws, "outline.json"), "utf-8"));
+    expect(parsed.sections.length).toBeGreaterThanOrEqual(2);
+    expect(parsed.sections[0].id).toBeTruthy();
+    expect(parsed.chapters[0].id).toBeTruthy();
+  });
 });
 
 describe("runtime registry", () => {

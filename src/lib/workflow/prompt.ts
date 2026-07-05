@@ -1,7 +1,15 @@
-import type { StandardStage } from "../schema.js";
+export type PromptUnit = {
+  title?: string;
+  owner: string;
+  inputs: string[];
+  optional_inputs: string[];
+  outputs: string[];
+  tools: string[];
+  validators: string[];
+};
 
 export type PromptContext = {
-  stage: StandardStage;
+  stage: PromptUnit;
   unitKey: string;
   retryFeedback?: string[];
 };

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { StandardStage, WorkflowDef } from "../schema.js";
+import type { ForeachStage, StandardStage, WorkflowDef, WorkflowStep } from "../schema.js";
 import {
   appendEvent,
   checkpointsDir,
@@ -11,6 +11,7 @@ import {
   workflowHash,
   type FlowState,
 } from "./state.js";
+import { expandForeachItems, resolveItemTemplates } from "./foreach.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
 import type { StageRunResult, WorkerRuntime } from "./runtimes/base.js";
@@ -34,6 +35,25 @@ const PAUSE_OUTCOMES = new Set([
   "budget_exceeded",
 ]);
 
+export type WorkUnitSpec = {
+  key: string;
+  title?: string;
+  owner: string;
+  inputs: string[];
+  optional_inputs: string[];
+  outputs: string[];
+  tools: string[];
+  validators: string[];
+  requires_human_approval?: boolean;
+  retry?: { max_attempts: number };
+  runtime?: string;
+  model?: string;
+  model_tier?: string;
+  stageId: string;
+  stepId?: string;
+  itemId?: string;
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -42,17 +62,17 @@ function concreteOutputs(outputs: string[]): string[] {
   return outputs.filter((o) => !o.includes("*") && !o.includes("{{"));
 }
 
-function resolveRuntimeId(stage: StandardStage, workflow: WorkflowDef, fallback: string): string {
-  if (stage.runtime) return stage.runtime;
-  if (stage.model_tier && workflow.model_tiers?.[stage.model_tier]) {
-    return workflow.model_tiers[stage.model_tier].runtime;
+function resolveRuntimeId(spec: WorkUnitSpec, workflow: WorkflowDef, fallback: string): string {
+  if (spec.runtime) return spec.runtime;
+  if (spec.model_tier && workflow.model_tiers?.[spec.model_tier]) {
+    return workflow.model_tiers[spec.model_tier].runtime;
   }
   return workflow.runtime_policy?.primary ?? fallback;
 }
 
-function resolveModel(stage: StandardStage, workflow: WorkflowDef): string | undefined {
-  if (stage.model) return stage.model;
-  if (stage.model_tier) return workflow.model_tiers?.[stage.model_tier]?.model;
+function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undefined {
+  if (spec.model) return spec.model;
+  if (spec.model_tier) return workflow.model_tiers?.[spec.model_tier]?.model;
   return undefined;
 }
 
@@ -103,21 +123,22 @@ async function appendValidationReport(
 
 /** Run one unit to a terminal outcome: succeeded, failed, or paused. */
 async function runUnit(
-  stage: StandardStage,
+  spec: WorkUnitSpec,
   opts: RunFlowOptions,
   state: FlowState,
 ): Promise<"succeeded" | "failed" | "paused"> {
   const { workspaceDir, workflow, runtime } = opts;
-  const unitKey = stage.id;
+  const unitKey = spec.key;
+  state.units[unitKey] ??= { status: "pending", attempts: 0, approvalGranted: false };
   const unit = state.units[unitKey];
-  const maxAttempts = stage.retry?.max_attempts ?? 2;
-  const requestedRuntimeId = resolveRuntimeId(stage, workflow, runtime.id);
+  const maxAttempts = spec.retry?.max_attempts ?? 2;
+  const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
   unit.requestedRuntime = requestedRuntimeId;
   // M2a: the caller supplies one runtime instance; record divergence rather
   // than silently swapping. Real multi-runtime dispatch arrives with M7.
   unit.actualRuntime = runtime.id;
 
-  await checkpointOutputs(workspaceDir, unitKey, stage.outputs);
+  await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
 
   let retryFeedback: string[] | undefined;
   let backoffs = 0;
@@ -130,15 +151,16 @@ async function runUnit(
       requestedRuntime: requestedRuntimeId, actualRuntime: runtime.id,
     });
 
-    const prompt = renderUnitPrompt({ stage, unitKey, retryFeedback });
+    const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
     const promptPath = path.join(promptsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.md`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
     let result = await runtime.runStage({
-      workspaceDir, unitKey, owner: stage.owner, instructions: prompt,
-      outputs: stage.outputs, timeoutMs: 600_000,
-      model: resolveModel(stage, workflow), promptPath,
+      owner: spec.owner, instructions: prompt,
+      workspaceDir, unitKey,
+      outputs: spec.outputs, timeoutMs: 600_000,
+      model: resolveModel(spec, workflow), promptPath,
     });
 
     // Rate limits back off and re-run without consuming an attempt.
@@ -154,9 +176,9 @@ async function runUnit(
       await appendEvent(workspaceDir, { type: "unit_backoff", key: unitKey, backoffs });
       await sleep(opts.backoffMs ?? 1000);
       result = await runtime.runStage({
-        workspaceDir, unitKey, owner: stage.owner, instructions: prompt,
-        outputs: stage.outputs, timeoutMs: 600_000,
-        model: resolveModel(stage, workflow), promptPath,
+        workspaceDir, unitKey, owner: spec.owner, instructions: prompt,
+        outputs: spec.outputs, timeoutMs: 600_000,
+        model: resolveModel(spec, workflow), promptPath,
       });
     }
 
@@ -171,7 +193,7 @@ async function runUnit(
     }
 
     if (result.outcome === "success") {
-      const report = await runValidators(stage.validators, stage.outputs, workspaceDir);
+      const report = await runValidators(spec.validators, spec.outputs, workspaceDir);
       await appendValidationReport(workspaceDir, unitKey, report.findings, report.pass);
       if (report.pass) {
         unit.status = "succeeded";
@@ -197,16 +219,197 @@ async function runUnit(
   return "failed";
 }
 
-export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
-  const { workflow, workspaceDir } = opts;
+function stageToSpec(stage: StandardStage): WorkUnitSpec {
+  return {
+    key: stage.id,
+    stageId: stage.id,
+    title: stage.title,
+    owner: stage.owner,
+    inputs: stage.inputs,
+    optional_inputs: stage.optional_inputs,
+    outputs: stage.outputs,
+    tools: stage.tools,
+    validators: stage.validators,
+    requires_human_approval: stage.requires_human_approval,
+    retry: stage.retry,
+    runtime: stage.runtime,
+    model: stage.model,
+    model_tier: stage.model_tier,
+  };
+}
 
-  for (const stage of workflow.stages) {
-    if ("steps" in stage) {
-      throw new Error(
-        `Stage "${stage.id}" is a foreach stage — foreach scheduling arrives in the next milestone (M2b)`,
-      );
+function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): WorkUnitSpec {
+  const mapPath = (value: string) => resolveItemTemplates(value, stage.item_name, itemId);
+  return {
+    key: `${stage.id}.${step.id}[${itemId}]`,
+    stageId: stage.id,
+    stepId: step.id,
+    itemId,
+    title: step.title ?? stage.title,
+    owner: step.owner,
+    inputs: step.inputs.map(mapPath),
+    optional_inputs: step.optional_inputs.map(mapPath),
+    outputs: step.outputs.map(mapPath),
+    tools: step.tools,
+    validators: step.validators,
+    requires_human_approval: step.requires_human_approval,
+    retry: step.retry,
+    runtime: step.runtime,
+    model: step.model,
+    model_tier: step.model_tier,
+  };
+}
+
+function approvalId(spec: WorkUnitSpec, pendingCount: number): string {
+  const suffix = String(pendingCount + 1).padStart(3, "0");
+  if (spec.itemId && spec.stepId) return `approve-${spec.stageId}-${spec.stepId}-${spec.itemId}-${suffix}`;
+  return `approve-${spec.stageId}-${suffix}`;
+}
+
+function queueApproval(state: FlowState, spec: WorkUnitSpec): void {
+  if (state.pendingApprovals.some((a) =>
+    a.stageId === spec.stageId && a.stepId === spec.stepId && a.itemId === spec.itemId
+  )) {
+    return;
+  }
+  state.units[spec.key].approvalGranted = false;
+  state.pendingApprovals.push({
+    id: approvalId(spec, state.pendingApprovals.length),
+    stageId: spec.stageId,
+    stepId: spec.stepId,
+    itemId: spec.itemId,
+    artifacts: concreteOutputs(spec.outputs),
+  });
+}
+
+function approvalUnitKey(approval: { stageId: string; stepId?: string; itemId?: string }): string {
+  if (approval.stepId && approval.itemId) return `${approval.stageId}.${approval.stepId}[${approval.itemId}]`;
+  return approval.stageId;
+}
+
+function hasPendingApprovalForItem(state: FlowState, stageId: string, itemId: string): boolean {
+  return state.pendingApprovals.some((a) => a.stageId === stageId && a.itemId === itemId);
+}
+
+function hasPendingApprovalForStage(state: FlowState, stageId: string): boolean {
+  return state.pendingApprovals.some((a) => a.stageId === stageId);
+}
+
+async function ensureForeachExpansion(
+  stage: ForeachStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+): Promise<string[]> {
+  if (!state.foreachItems[stage.id]) {
+    state.foreachItems[stage.id] = await expandForeachItems(stage, opts.workspaceDir);
+    for (const itemId of state.foreachItems[stage.id]) {
+      for (const step of stage.steps) {
+        const key = `${stage.id}.${step.id}[${itemId}]`;
+        state.units[key] ??= { status: "pending", attempts: 0, approvalGranted: false };
+      }
+    }
+    await appendEvent(opts.workspaceDir, {
+      type: "foreach_expanded",
+      key: stage.id,
+      items: state.foreachItems[stage.id],
+    });
+    await saveFlowState(opts.workspaceDir, state);
+  }
+  return state.foreachItems[stage.id];
+}
+
+function nextReadySpec(stage: ForeachStage, state: FlowState, running: Set<string>): WorkUnitSpec | null {
+  const itemIds = state.foreachItems[stage.id] ?? [];
+  for (const itemId of itemIds) {
+    if (hasPendingApprovalForItem(state, stage.id, itemId)) continue;
+    for (let i = 0; i < stage.steps.length; i += 1) {
+      const step = stage.steps[i];
+      const spec = stepToSpec(stage, step, itemId);
+      const unit = state.units[spec.key];
+      if (unit?.status === "succeeded") continue;
+      if (unit?.status === "failed") break;
+      if (running.has(spec.key)) break;
+      if (i > 0) {
+        const previous = stepToSpec(stage, stage.steps[i - 1], itemId);
+        const previousUnit = state.units[previous.key];
+        if (previousUnit?.status !== "succeeded") break;
+        if (previous.requires_human_approval && !previousUnit.approvalGranted) break;
+      }
+      return spec;
     }
   }
+  return null;
+}
+
+async function runForeachStage(
+  stage: ForeachStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+  runtimeMaxConcurrent: number,
+): Promise<"succeeded" | "failed" | "paused" | "awaiting_review"> {
+  await ensureForeachExpansion(stage, opts, state);
+  const stageUnit = state.units[stage.id];
+  stageUnit.status = "running";
+  const cap = Math.max(1, Math.min(stage.max_parallel, opts.workflow.max_parallel, runtimeMaxConcurrent));
+  const running = new Map<string, Promise<{ spec: WorkUnitSpec; outcome: "succeeded" | "failed" | "paused" }>>();
+  let pausing = false;
+
+  while (true) {
+    while (!pausing && running.size < cap) {
+      const spec = nextReadySpec(stage, state, new Set(running.keys()));
+      if (!spec) break;
+      const promise = runUnit(spec, opts, state).then((outcome) => ({ spec, outcome }));
+      running.set(spec.key, promise);
+    }
+
+    if (running.size === 0) break;
+
+    const settled = await Promise.race(running.values());
+    running.delete(settled.spec.key);
+
+    if (settled.outcome === "paused") {
+      pausing = true;
+    } else if (settled.outcome === "succeeded" && settled.spec.requires_human_approval) {
+      queueApproval(state, settled.spec);
+      await appendEvent(opts.workspaceDir, { type: "flow_review_queued", key: settled.spec.key });
+    }
+    await saveFlowState(opts.workspaceDir, state);
+  }
+
+  if (pausing) {
+    stageUnit.status = "pending";
+    return "paused";
+  }
+
+  const itemIds = state.foreachItems[stage.id] ?? [];
+  const anyFailed = itemIds.some((itemId) =>
+    stage.steps.some((step) => state.units[`${stage.id}.${step.id}[${itemId}]`]?.status === "failed")
+  );
+  if (anyFailed) {
+    stageUnit.status = "failed";
+    return "failed";
+  }
+
+  if (hasPendingApprovalForStage(state, stage.id)) {
+    stageUnit.status = "pending";
+    return "awaiting_review";
+  }
+
+  const allSucceeded = itemIds.every((itemId) =>
+    stage.steps.every((step) => state.units[`${stage.id}.${step.id}[${itemId}]`]?.status === "succeeded")
+  );
+  if (!allSucceeded) {
+    stageUnit.status = "pending";
+    return "awaiting_review";
+  }
+
+  stageUnit.status = "succeeded";
+  await appendEvent(opts.workspaceDir, { type: "unit_succeeded", key: stage.id });
+  return "succeeded";
+}
+
+export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
+  const { workflow, workspaceDir } = opts;
 
   let state = await loadFlowState(workspaceDir);
   if (state && state.workflowHash !== workflowHash(workflow)) {
@@ -226,6 +429,8 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
 
   state.status = "running";
   await saveFlowState(workspaceDir, state);
+  const health = await opts.runtime.checkAvailable();
+  const runtimeMaxConcurrent = health.max_concurrent ?? Number.POSITIVE_INFINITY;
 
   for (const stage of workflow.stages) {
     const unit = state.units[stage.id];
@@ -238,7 +443,9 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
     }
 
     unit.status = "pending";
-    const outcome = await runUnit(stage as StandardStage, opts, state);
+    const outcome = "steps" in stage
+      ? await runForeachStage(stage, opts, state, runtimeMaxConcurrent)
+      : await runUnit(stageToSpec(stage), opts, state);
     await saveFlowState(workspaceDir, state);
 
     if (outcome === "failed") {
@@ -253,12 +460,15 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
       return state;
     }
 
-    if ((stage as StandardStage).requires_human_approval) {
-      state.pendingApprovals.push({
-        id: `approve-${stage.id}-${String(state.pendingApprovals.length + 1).padStart(3, "0")}`,
-        stageId: stage.id,
-        artifacts: concreteOutputs((stage as StandardStage).outputs),
-      });
+    if (outcome === "awaiting_review") {
+      state.status = "paused_for_approval";
+      await appendEvent(workspaceDir, { type: "flow_paused_approval", key: stage.id });
+      await saveFlowState(workspaceDir, state);
+      return state;
+    }
+
+    if (!("steps" in stage) && stage.requires_human_approval) {
+      queueApproval(state, stageToSpec(stage));
       state.status = "paused_for_approval";
       await appendEvent(workspaceDir, { type: "flow_paused_approval", key: stage.id });
       await saveFlowState(workspaceDir, state);
@@ -281,11 +491,33 @@ export async function approveFlow(workspaceDir: string, approvalId: string): Pro
       `Approval "${approvalId}" not found. Pending: ${state.pendingApprovals.map((a) => a.id).join(", ") || "none"}`,
     );
   }
-  state.pendingApprovals.splice(index, 1);
+  const [approval] = state.pendingApprovals.splice(index, 1);
+  const unit = state.units[approvalUnitKey(approval)];
+  if (unit) unit.approvalGranted = true;
   if (state.pendingApprovals.length === 0 && state.status === "paused_for_approval") {
     state.status = "idle";
   }
   await appendEvent(workspaceDir, { type: "approval_granted", key: approvalId });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+export async function approveAllFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  const approvals = [...state.pendingApprovals];
+  state.pendingApprovals = [];
+  for (const approval of approvals) {
+    const unit = state.units[approvalUnitKey(approval)];
+    if (unit) unit.approvalGranted = true;
+  }
+  if (state.status === "paused_for_approval") {
+    state.status = "idle";
+  }
+  await appendEvent(workspaceDir, {
+    type: "approvals_granted_batch",
+    approvals: approvals.map((a) => a.id),
+  });
   await saveFlowState(workspaceDir, state);
   return state;
 }

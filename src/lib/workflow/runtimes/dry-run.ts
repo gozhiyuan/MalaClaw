@@ -44,6 +44,13 @@ export class DryRunRuntime implements WorkerRuntime {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       const content =
         this.fixtures[output] ??
+        (output.endsWith(".json")
+          ? JSON.stringify({
+              sections: [{ id: "section-1" }, { id: "section-2" }],
+              chapters: [{ id: "chapter-1" }, { id: "chapter-2" }],
+              items: [{ id: "item-1" }, { id: "item-2" }],
+            }, null, 2)
+          : null) ??
         `# dry-run artifact\nunit: ${req.unitKey}\nowner: ${req.owner}\n`;
       await fs.writeFile(filePath, content, "utf-8");
       produced.push(output);

@@ -78,4 +78,13 @@ describe("flow state", () => {
     const stat = await fs.stat(path.join(flowDir(ws), "state.json"));
     expect(stat.isFile()).toBe(true);
   });
+
+  it("persists foreach item expansions", async () => {
+    const ws = await makeWorkspace();
+    const state = await initFlowState(wf, ws);
+    state.foreachItems.draft_sections = ["s1", "s2"];
+    await saveFlowState(ws, state);
+    const loaded = await loadFlowState(ws);
+    expect(loaded?.foreachItems.draft_sections).toEqual(["s1", "s2"]);
+  });
 });

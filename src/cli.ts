@@ -374,6 +374,28 @@ flow
     await runFlowReport();
   });
 
+flow
+  .command("review")
+  .description("Review pending approvals")
+  .option("--batch", "Approve all pending review items")
+  .action(async (opts) => {
+    if (!opts.batch) {
+      console.log("Use --batch to approve all pending review items.");
+      return;
+    }
+    const { runFlowReviewBatch } = await import("./commands/flow.js");
+    await runFlowReviewBatch();
+  });
+
+flow
+  .command("continue")
+  .description("Continue a workflow after approvals or blockers are cleared")
+  .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")
+  .action(async (opts) => {
+    const { runFlowRun } = await import("./commands/flow.js");
+    await runFlowRun({ runtime: opts.runtime });
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 
 program

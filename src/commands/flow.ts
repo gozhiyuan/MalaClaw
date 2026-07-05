@@ -1,6 +1,6 @@
 import { loadManifest } from "../lib/loader.js";
 import { resolveManifest } from "../lib/resolver.js";
-import { runFlow, approveFlow, getFlowStatus } from "../lib/workflow/engine.js";
+import { runFlow, approveFlow, approveAllFlow, getFlowStatus } from "../lib/workflow/engine.js";
 import { getWorkerRuntime } from "../lib/workflow/runtimes/registry.js";
 
 export async function runFlowRun(opts: { runtime?: string; reset?: boolean }): Promise<void> {
@@ -40,6 +40,12 @@ export async function runFlowApprove(approvalId: string): Promise<void> {
   printState(state);
 }
 
+export async function runFlowReviewBatch(): Promise<void> {
+  const state = await approveAllFlow(process.cwd());
+  console.log("✓ Approved all pending review items");
+  printState(state);
+}
+
 export async function runFlowReport(): Promise<void> {
   const state = await getFlowStatus(process.cwd());
   if (!state || state.pendingApprovals.length === 0) {
@@ -48,16 +54,22 @@ export async function runFlowReport(): Promise<void> {
   }
   console.log("# Pending review\n");
   for (const approval of state.pendingApprovals) {
-    console.log(`- ${approval.id} (stage: ${approval.stageId})`);
+    const scope = [
+      `stage: ${approval.stageId}`,
+      approval.stepId ? `step: ${approval.stepId}` : null,
+      approval.itemId ? `item: ${approval.itemId}` : null,
+    ].filter(Boolean).join(", ");
+    console.log(`- ${approval.id} (${scope})`);
     for (const artifact of approval.artifacts) console.log(`    artifact: ${artifact}`);
     console.log(`    approve with: malaclaw flow approve ${approval.id}`);
   }
+  console.log("\nBatch approve with: malaclaw flow review --batch");
 }
 
 function printState(state: {
   status: string;
   units: Record<string, { status: string; attempts: number }>;
-  pendingApprovals: Array<{ id: string; stageId: string }>;
+  pendingApprovals: Array<{ id: string; stageId: string; stepId?: string; itemId?: string }>;
 }): void {
   console.log(`\nFlow status: ${state.status}`);
   for (const [key, unit] of Object.entries(state.units)) {
@@ -65,6 +77,7 @@ function printState(state: {
     console.log(`  ${mark} ${key} (${unit.status}, attempts: ${unit.attempts})`);
   }
   for (const approval of state.pendingApprovals) {
-    console.log(`  ⏸ approval required: ${approval.id} — malaclaw flow approve ${approval.id}`);
+    const target = [approval.stageId, approval.stepId, approval.itemId].filter(Boolean).join(" / ");
+    console.log(`  ⏸ approval required: ${approval.id} (${target}) — malaclaw flow approve ${approval.id}`);
   }
 }

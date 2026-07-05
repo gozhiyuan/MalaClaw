@@ -150,17 +150,20 @@ describe("runFlow", () => {
     expect(state.status).toBe("completed");
   });
 
-  it("throws a clear error for foreach stages (M2b)", async () => {
+  it("runs a foreach stage after a producer emits an item artifact", async () => {
     const ws = await makeWorkspace();
     const wf = WorkflowDef.parse({
-      stages: [{
-        type: "foreach", id: "items", foreach: "outline.sections",
-        steps: [{ id: "draft", owner: "pm" }],
-      }],
+      stages: [
+        { id: "outline", owner: "pm", outputs: ["outline.json"] },
+        {
+          type: "foreach", id: "items", foreach: "outline.sections",
+          steps: [{ id: "draft", owner: "pm", outputs: ["chapters/{{item.id}}.md"] }],
+        },
+      ],
     });
-    await expect(
-      runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() }),
-    ).rejects.toThrow(/foreach/i);
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(state.status).toBe("completed");
+    expect(state.units["items.draft[section-1]"].status).toBe("succeeded");
   });
 });
 
