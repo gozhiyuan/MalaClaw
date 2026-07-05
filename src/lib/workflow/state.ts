@@ -1,0 +1,118 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import crypto from "node:crypto";
+import { z } from "zod";
+import { StageRunOutcome, type WorkflowDef } from "../schema.js";
+
+export const UnitState = z.object({
+  status: z.enum(["pending", "running", "succeeded", "failed"]).default("pending"),
+  attempts: z.number().int().default(0),
+  lastOutcome: StageRunOutcome.optional(),
+  lastError: z.string().optional(),
+  requestedRuntime: z.string().optional(),
+  actualRuntime: z.string().optional(),
+});
+export type UnitState = z.infer<typeof UnitState>;
+
+export const PendingApproval = z.object({
+  id: z.string(),
+  stageId: z.string(),
+  artifacts: z.array(z.string()).default([]),
+});
+export type PendingApproval = z.infer<typeof PendingApproval>;
+
+export const FlowState = z.object({
+  version: z.number().default(1),
+  workflowHash: z.string(),
+  status: z.enum([
+    "idle",
+    "running",
+    "paused_for_approval",
+    "paused_blocker",
+    "completed",
+    "failed",
+  ]).default("idle"),
+  units: z.record(UnitState),
+  pendingApprovals: z.array(PendingApproval).default([]),
+  updatedAt: z.string(),
+});
+export type FlowState = z.infer<typeof FlowState>;
+
+export function flowDir(workspaceDir: string): string {
+  return path.join(workspaceDir, ".malaclaw", "flow");
+}
+export function promptsDir(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "prompts");
+}
+export function logsDir(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "logs");
+}
+export function checkpointsDir(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "checkpoints");
+}
+function statePath(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "state.json");
+}
+function eventsPath(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "events.jsonl");
+}
+
+/** Stable hash of the workflow definition so a changed manifest is detected. */
+export function workflowHash(workflow: WorkflowDef): string {
+  return crypto.createHash("sha256").update(JSON.stringify(workflow)).digest("hex").slice(0, 16);
+}
+
+export async function initFlowState(workflow: WorkflowDef, workspaceDir: string): Promise<FlowState> {
+  const units: Record<string, UnitState> = {};
+  for (const stage of workflow.stages) {
+    // M2a: sequential stages only; foreach expansion arrives in M2b.
+    units[stage.id] = UnitState.parse({});
+  }
+  const state: FlowState = FlowState.parse({
+    workflowHash: workflowHash(workflow),
+    units,
+    updatedAt: new Date().toISOString(),
+  });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+export async function saveFlowState(workspaceDir: string, state: FlowState): Promise<void> {
+  state.updatedAt = new Date().toISOString();
+  await fs.mkdir(flowDir(workspaceDir), { recursive: true });
+  await fs.writeFile(statePath(workspaceDir), JSON.stringify(state, null, 2), "utf-8");
+}
+
+export async function loadFlowState(workspaceDir: string): Promise<FlowState | null> {
+  try {
+    const raw = await fs.readFile(statePath(workspaceDir), "utf-8");
+    return FlowState.parse(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export type FlowEvent = {
+  ts?: string;
+  type: string;
+  key?: string;
+  [extra: string]: unknown;
+};
+
+export async function appendEvent(workspaceDir: string, event: FlowEvent): Promise<void> {
+  await fs.mkdir(flowDir(workspaceDir), { recursive: true });
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...event });
+  await fs.appendFile(eventsPath(workspaceDir), line + "\n", "utf-8");
+}
+
+export async function readEvents(workspaceDir: string): Promise<FlowEvent[]> {
+  try {
+    const raw = await fs.readFile(eventsPath(workspaceDir), "utf-8");
+    return raw
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as FlowEvent);
+  } catch {
+    return [];
+  }
+}
