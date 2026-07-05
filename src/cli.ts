@@ -334,6 +334,46 @@ program
     await runValidate();
   });
 
+// ── flow ──────────────────────────────────────────────────────────────────────
+
+const flow = program
+  .command("flow")
+  .description("Run and manage workflow flows (workflow: section in malaclaw.yaml)");
+
+flow
+  .command("run")
+  .description("Run the workflow from current state (resumes automatically)")
+  .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")
+  .option("--reset", "Reinitialize state after a workflow definition change")
+  .action(async (opts) => {
+    const { runFlowRun } = await import("./commands/flow.js");
+    await runFlowRun({ runtime: opts.runtime, reset: opts.reset });
+  });
+
+flow
+  .command("status")
+  .description("Show current flow state")
+  .action(async () => {
+    const { runFlowStatus } = await import("./commands/flow.js");
+    await runFlowStatus();
+  });
+
+flow
+  .command("approve <approvalId>")
+  .description("Grant a pending approval, unblocking dependent stages")
+  .action(async (approvalId) => {
+    const { runFlowApprove } = await import("./commands/flow.js");
+    await runFlowApprove(approvalId);
+  });
+
+flow
+  .command("report")
+  .description("List pending approvals for batch review")
+  .action(async () => {
+    const { runFlowReport } = await import("./commands/flow.js");
+    await runFlowReport();
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 
 program
