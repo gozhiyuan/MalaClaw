@@ -28,6 +28,7 @@ type WorkUnit = {
   owner: string;
   inputs: string[];
   outputs: string[];
+  modelTier?: string;
 };
 
 /** Flatten a stage into ordered work units. Foreach steps keep their declared
@@ -40,9 +41,16 @@ function toWorkUnits(stage: WorkflowStage): WorkUnit[] {
       owner: step.owner,
       inputs: step.inputs,
       outputs: step.outputs,
+      modelTier: step.model_tier,
     }));
   }
-  return [{ label: stage.id, owner: stage.owner, inputs: stage.inputs, outputs: stage.outputs }];
+  return [{
+    label: stage.id,
+    owner: stage.owner,
+    inputs: stage.inputs,
+    outputs: stage.outputs,
+    modelTier: stage.model_tier,
+  }];
 }
 
 /** Semantic checks that need resolved context (schema-shape checks live in Zod).
@@ -61,6 +69,11 @@ export function validateWorkflowSemantics(
       if (!availableOwnerIds.has(unit.owner)) {
         errors.push(
           `Stage "${unit.label}": owner "${unit.owner}" is not an agent in any selected team or attached agent`,
+        );
+      }
+      if (unit.modelTier && !(workflow.model_tiers && unit.modelTier in workflow.model_tiers)) {
+        errors.push(
+          `Stage "${unit.label}": model_tier "${unit.modelTier}" is not defined in workflow.model_tiers`,
         );
       }
       for (const input of unit.inputs) {

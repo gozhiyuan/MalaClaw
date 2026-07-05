@@ -246,6 +246,43 @@ export const WorkflowRetry = z
   })
   .strict();
 
+// Classified worker outcomes so the scheduler can act deterministically
+// instead of treating every failure as a generic error.
+export const StageRunOutcome = z.enum([
+  "success",
+  "validation_failed",
+  "worker_error",
+  "timeout",
+  "rate_limited",
+  "quota_exhausted",
+  "permission_blocked",
+  "tool_missing",
+  "model_unavailable",
+  "budget_exceeded",
+]);
+
+// A named model tier maps cheap/balanced/strong work to a runtime + model.
+export const ModelTier = z
+  .object({
+    runtime: z.string().min(1),
+    model: z.string().optional(),
+    max_cost_usd: z.number().positive().optional(),
+    requires_budget_approval: z.boolean().default(false),
+  })
+  .strict();
+
+// Explicit runtime selection + failure policy. Fallback is never silent:
+// the engine records requested vs actual runtime/model in state and events.
+export const RuntimePolicy = z
+  .object({
+    primary: z.string().min(1).default("dry-run"),
+    fallback: z.array(z.string()).default([]),
+    on_rate_limit: z.enum(["backoff", "fail"]).default("backoff"),
+    on_quota_exhausted: z.enum(["try_fallback", "pause"]).default("pause"),
+    on_budget_exceeded: z.enum(["require_approval", "pause"]).default("require_approval"),
+  })
+  .strict();
+
 // Fields shared by normal stages and foreach inner steps.
 const workUnitFields = {
   id: z.string().min(1),
@@ -260,6 +297,11 @@ const workUnitFields = {
   validators: z.array(z.string()).default([]),
   requires_human_approval: z.boolean().default(false),
   retry: WorkflowRetry.optional(),
+  // Runtime/model selection overrides. Resolution order:
+  // unit override -> model_tier -> workflow runtime_policy.primary.
+  runtime: z.string().optional(),
+  model: z.string().optional(),
+  model_tier: z.string().optional(),
 };
 
 // Inner step of a foreach item pipeline. Output paths may use {{item.id}}
@@ -315,6 +357,10 @@ export const WorkflowDef = z
     external_inputs: z.array(z.string()).default([]),
     // Global cap on concurrently running foreach items across the workflow.
     max_parallel: z.number().int().min(1).default(2),
+    runtime_policy: RuntimePolicy.optional(),
+    model_tiers: z.record(ModelTier).optional(),
+    // Soft budget for the whole flow; enforcement arrives with real runtimes.
+    budget_usd: z.number().positive().optional(),
     stages: z.array(WorkflowStage).min(1),
   })
   .strict()
@@ -333,6 +379,9 @@ export const WorkflowDef = z
   });
 
 export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
+export type StageRunOutcome = z.infer<typeof StageRunOutcome>;
+export type ModelTier = z.infer<typeof ModelTier>;
+export type RuntimePolicy = z.infer<typeof RuntimePolicy>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;
