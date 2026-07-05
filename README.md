@@ -22,6 +22,7 @@ The bottleneck in multi-agent adoption is usually not raw model capability. It i
 | Project bootstrap | Zero-config OpenClaw bootstrap or manifest-driven project install |
 | Runtime adapters | One project model for OpenClaw, Claude Code, Codex, and ClawTeam |
 | Team orchestration | Entry-point agents, reusable team graphs, and topology-aware coordination |
+| Workflow manifests | Declare stage-based workflows (`workflow:`) with owners, artifacts, validators, approval gates, and foreach item pipelines — validated by `malaclaw validate` |
 | Skill management | Project-targeted skill sync, install, allowlisting, and env requirement checks |
 | Dashboard | Web UI for projects, agents, starter discovery, config review, and status checks |
 | Telemetry | Normalized per-agent status files across supported runtimes |

@@ -165,6 +165,7 @@ All data shapes are defined as Zod schemas in `schema.ts`. Always use the inferr
 | `StarterDef` | `starters/*.yaml` | Curated starter definition with use case + bootstrap prompt |
 | `DemoProjectDef` | `demo-projects/index.yaml` | Richer demo card with execution modes and setup guidance |
 | `Manifest` | `malaclaw.yaml` | Desired state (packs + skills + project metadata) |
+| `WorkflowDef` | `malaclaw.yaml` `workflow:` | Stage-based workflow IR: normal stages + foreach item pipelines, owners, artifacts, validators, approval gates, parallelism caps (no execution engine yet) |
 | `Lockfile` | `malaclaw.lock` | Resolved state (exact agents, workspaces, skill statuses) |
 | `RuntimeState` | `~/.malaclaw/runtime.json` | Global project registry |
 | `SkillInventory` | `~/.malaclaw/skills-index.json` | Discovered skill availability index |
