@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
+import { ScriptRuntime } from "../src/lib/workflow/runtimes/script.js";
 import { getWorkerRuntime, registerWorkerRuntime } from "../src/lib/workflow/runtimes/registry.js";
 
 const tempDirs: string[] = [];
@@ -89,6 +90,10 @@ describe("runtime registry", () => {
     expect(getWorkerRuntime("dry-run").id).toBe("dry-run");
   });
 
+  it("has script registered by default", () => {
+    expect(getWorkerRuntime("script").id).toBe("script");
+  });
+
   it("throws a helpful error for unknown runtimes", () => {
     expect(() => getWorkerRuntime("warp-drive")).toThrow(/warp-drive/);
   });
@@ -100,5 +105,50 @@ describe("runtime registry", () => {
       runStage: async () => ({ outcome: "success", producedFiles: [] }),
     });
     expect(getWorkerRuntime("custom-test").id).toBe("custom-test");
+  });
+});
+
+describe("ScriptRuntime", () => {
+  it("runs a structured command in the workspace and captures logs", async () => {
+    const ws = await makeWorkspace();
+    const script = path.join(ws, "write-output.mjs");
+    await fs.writeFile(script, "import fs from 'node:fs/promises'; await fs.writeFile('out.txt', 'ok'); console.log('done');\n", "utf-8");
+    const runtime = new ScriptRuntime();
+    const result = await runtime.runStage(request(ws, {
+      unitKey: "scripted",
+      outputs: ["out.txt"],
+      command: { cmd: process.execPath, args: [script] },
+      logPath: path.join(ws, "script.log"),
+    }));
+    expect(result.outcome).toBe("success");
+    expect(await fs.readFile(path.join(ws, "out.txt"), "utf-8")).toBe("ok");
+    expect(await fs.readFile(path.join(ws, "script.log"), "utf-8")).toContain("done");
+  });
+
+  it("passes stage context through environment variables", async () => {
+    const ws = await makeWorkspace();
+    const script = path.join(ws, "write-env.mjs");
+    await fs.writeFile(
+      script,
+      "import fs from 'node:fs/promises'; await fs.writeFile('env.json', JSON.stringify({ key: process.env.MALACLAW_UNIT_KEY, outputs: JSON.parse(process.env.MALACLAW_STAGE_OUTPUTS) }));\n",
+      "utf-8",
+    );
+    const runtime = new ScriptRuntime();
+    const result = await runtime.runStage(request(ws, {
+      unitKey: "draft_sections.draft[section-1]",
+      outputs: ["env.json"],
+      command: { cmd: process.execPath, args: [script] },
+    }));
+    expect(result.outcome).toBe("success");
+    const env = JSON.parse(await fs.readFile(path.join(ws, "env.json"), "utf-8"));
+    expect(env.key).toBe("draft_sections.draft[section-1]");
+    expect(env.outputs).toEqual(["env.json"]);
+  });
+
+  it("fails closed without a command", async () => {
+    const ws = await makeWorkspace();
+    const runtime = new ScriptRuntime();
+    const result = await runtime.runStage(request(ws));
+    expect(result.outcome).toBe("tool_missing");
   });
 });

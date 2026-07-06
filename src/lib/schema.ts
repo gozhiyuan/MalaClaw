@@ -295,6 +295,13 @@ export const RuntimePolicy = z
   })
   .strict();
 
+export const WorkflowCommand = z
+  .object({
+    cmd: z.string().min(1),
+    args: z.array(z.string()).default([]),
+  })
+  .strict();
+
 // Fields shared by normal stages and foreach inner steps.
 const workUnitFields = {
   id: workflowId,
@@ -307,6 +314,7 @@ const workUnitFields = {
   outputs: z.array(workspacePath).default([]),
   tools: z.array(z.string()).default([]),
   validators: z.array(z.string()).default([]),
+  validator_commands: z.array(WorkflowCommand).default([]),
   requires_human_approval: z.boolean().default(false),
   retry: WorkflowRetry.optional(),
   // Runtime/model selection overrides. Resolution order:
@@ -314,6 +322,7 @@ const workUnitFields = {
   runtime: z.string().optional(),
   model: z.string().optional(),
   model_tier: z.string().optional(),
+  command: WorkflowCommand.optional(),
 };
 
 // Inner step of a foreach item pipeline. Output paths may use {{item.id}}
@@ -394,6 +403,7 @@ export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
 export type StageRunOutcome = z.infer<typeof StageRunOutcome>;
 export type ModelTier = z.infer<typeof ModelTier>;
 export type RuntimePolicy = z.infer<typeof RuntimePolicy>;
+export type WorkflowCommand = z.infer<typeof WorkflowCommand>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;

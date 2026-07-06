@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { resolveWithin } from "./safe-paths.js";
+import type { WorkflowCommand } from "../schema.js";
 
 export type ValidatorReport = {
   pass: boolean;
@@ -73,12 +75,63 @@ const builtins: Record<string, ValidatorFn> = {
   },
 };
 
+function outputLines(value: string): string[] {
+  return value.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+function commandLabel(command: WorkflowCommand): string {
+  return [command.cmd, ...command.args].join(" ");
+}
+
+async function runValidatorCommand(
+  command: WorkflowCommand,
+  outputs: string[],
+  workspaceDir: string,
+): Promise<string[]> {
+  return new Promise((resolve) => {
+    const child = spawn(command.cmd, command.args, {
+      cwd: workspaceDir,
+      env: {
+        ...process.env,
+        MALACLAW_WORKSPACE: workspaceDir,
+        MALACLAW_VALIDATOR_OUTPUTS: JSON.stringify(outputs),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve([`external validator timed out: ${commandLabel(command)}`]);
+    }, 120_000);
+
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve([`external validator failed to start: ${commandLabel(command)}: ${err.message}`]);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const out = Buffer.concat(stdout).toString("utf-8");
+      const err = Buffer.concat(stderr).toString("utf-8");
+      if (code === 0) return resolve([]);
+      const lines = [...outputLines(err), ...outputLines(out)];
+      resolve(lines.length > 0
+        ? lines.map((line) => `external validator ${commandLabel(command)}: ${line}`)
+        : [`external validator ${commandLabel(command)} exited with code ${code}`]);
+    });
+  });
+}
+
 /** Run named validators over a unit's declared outputs. Unknown validator
  *  names fail closed — a typo must not silently skip a quality gate. */
 export async function runValidators(
   names: string[],
   outputs: string[],
   workspaceDir: string,
+  commands: WorkflowCommand[] = [],
 ): Promise<ValidatorReport> {
   const findings: string[] = [];
   for (const name of names) {
@@ -88,6 +141,9 @@ export async function runValidators(
       continue;
     }
     findings.push(...(await fn(outputs, workspaceDir)));
+  }
+  for (const command of commands) {
+    findings.push(...(await runValidatorCommand(command, outputs, workspaceDir)));
   }
   return { pass: findings.length === 0, findings };
 }

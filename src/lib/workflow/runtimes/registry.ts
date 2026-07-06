@@ -1,5 +1,6 @@
 import type { WorkerRuntime } from "./base.js";
 import { DryRunRuntime } from "./dry-run.js";
+import { ScriptRuntime } from "./script.js";
 
 // Deliberately separate from src/lib/adapters/registry.ts: those are
 // install-time provisioners; these execute workflow units.
@@ -20,3 +21,4 @@ export function getWorkerRuntime(id: string): WorkerRuntime {
 }
 
 registerWorkerRuntime(new DryRunRuntime());
+registerWorkerRuntime(new ScriptRuntime());

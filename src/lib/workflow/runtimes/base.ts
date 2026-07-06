@@ -1,4 +1,5 @@
 import type { StageRunOutcome } from "../../schema.js";
+import type { WorkflowCommand } from "../../schema.js";
 
 export type RuntimeHealth = {
   available: boolean;
@@ -16,6 +17,7 @@ export type StageRunRequest = {
   instructions: string;
   /** Declared output paths; concrete paths are the contract the worker must satisfy. */
   outputs: string[];
+  command?: WorkflowCommand;
   timeoutMs: number;
   model?: string;
   promptPath?: string;

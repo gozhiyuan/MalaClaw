@@ -16,6 +16,7 @@ describe("WorkflowStage schema", () => {
     expect(stage.outputs).toEqual([]);
     expect(stage.tools).toEqual([]);
     expect(stage.validators).toEqual([]);
+    expect(stage.validator_commands).toEqual([]);
     expect(stage.requires_human_approval).toBe(false);
     expect(stage.retry).toBeUndefined();
   });
@@ -29,6 +30,7 @@ describe("WorkflowStage schema", () => {
       outputs: ["chapters/*.md"],
       tools: ["web_search"],
       validators: ["required_output_exists", "citation_markers_present"],
+      validator_commands: [{ cmd: "longwrite", args: ["validate", "research", "."] }],
       requires_human_approval: true,
       retry: { max_attempts: 3 },
       max_rounds: 5,
@@ -36,6 +38,7 @@ describe("WorkflowStage schema", () => {
     });
     expect(stage.retry?.max_attempts).toBe(3);
     expect(stage.max_rounds).toBe(5);
+    expect(stage.validator_commands[0].args).toContain("research");
   });
 
   it("defaults retry.max_attempts to 2 when retry block is present but empty", () => {

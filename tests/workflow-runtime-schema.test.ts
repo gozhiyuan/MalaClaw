@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ModelTier, RuntimePolicy, StageRunOutcome, WorkflowDef, StandardStage } from "../src/lib/schema.js";
+import { ModelTier, RuntimePolicy, StageRunOutcome, WorkflowCommand, WorkflowDef, StandardStage } from "../src/lib/schema.js";
 import { validateWorkflowSemantics } from "../src/lib/workflow/validate.js";
 
 const owners = new Set(["pm", "tech-lead"]);
@@ -40,6 +40,19 @@ describe("ModelTier and RuntimePolicy", () => {
   });
 });
 
+describe("WorkflowCommand", () => {
+  it("parses a structured command with args", () => {
+    const command = WorkflowCommand.parse({ cmd: "node", args: ["script.js"] });
+    expect(command.cmd).toBe("node");
+    expect(command.args).toEqual(["script.js"]);
+  });
+
+  it("defaults args and rejects shell-shaped typos", () => {
+    expect(WorkflowCommand.parse({ cmd: "node" }).args).toEqual([]);
+    expect(() => WorkflowCommand.parse({ command: "node script.js" })).toThrow(/unrecognized key/i);
+  });
+});
+
 describe("workflow-level runtime config", () => {
   it("parses model_tiers, runtime_policy, and budget_usd", () => {
     const wf = WorkflowDef.parse({
@@ -53,8 +66,15 @@ describe("workflow-level runtime config", () => {
   });
 
   it("parses stage-level runtime/model overrides", () => {
-    const stage = StandardStage.parse({ id: "x", owner: "pm", runtime: "codex", model: "some-model" });
-    expect(stage.runtime).toBe("codex");
+    const stage = StandardStage.parse({
+      id: "x",
+      owner: "pm",
+      runtime: "script",
+      model: "some-model",
+      command: { cmd: "node", args: ["script.js"] },
+    });
+    expect(stage.runtime).toBe("script");
+    expect(stage.command?.cmd).toBe("node");
     expect(stage.model).toBe("some-model");
   });
 

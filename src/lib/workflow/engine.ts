@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ForeachStage, StandardStage, WorkflowDef, WorkflowStep } from "../schema.js";
+import type { ForeachStage, StandardStage, WorkflowCommand, WorkflowDef, WorkflowStep } from "../schema.js";
 import {
   appendEvent,
   checkpointsDir,
   initFlowState,
   loadFlowState,
   promptsDir,
+  logsDir,
   saveFlowState,
   workflowHash,
   type FlowState,
@@ -15,6 +16,7 @@ import { expandForeachItems, resolveItemTemplates } from "./foreach.js";
 import { resolveWithin } from "./safe-paths.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
+import { getWorkerRuntime } from "./runtimes/registry.js";
 import type { StageRunResult, WorkerRuntime } from "./runtimes/base.js";
 
 export type RunFlowOptions = {
@@ -45,11 +47,13 @@ export type WorkUnitSpec = {
   outputs: string[];
   tools: string[];
   validators: string[];
+  validator_commands: WorkflowCommand[];
   requires_human_approval?: boolean;
   retry?: { max_attempts: number };
   runtime?: string;
   model?: string;
   model_tier?: string;
+  command?: { cmd: string; args: string[] };
   stageId: string;
   stepId?: string;
   itemId?: string;
@@ -136,10 +140,9 @@ async function runUnit(
   const unit = state.units[unitKey];
   const maxAttempts = spec.retry?.max_attempts ?? 2;
   const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
+  const unitRuntime = requestedRuntimeId === runtime.id ? runtime : getWorkerRuntime(requestedRuntimeId);
   unit.requestedRuntime = requestedRuntimeId;
-  // M2a: the caller supplies one runtime instance; record divergence rather
-  // than silently swapping. Real multi-runtime dispatch arrives with M7.
-  unit.actualRuntime = runtime.id;
+  unit.actualRuntime = unitRuntime.id;
 
   await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
 
@@ -151,19 +154,21 @@ async function runUnit(
     unit.status = "running";
     await appendEvent(workspaceDir, {
       type: "unit_started", key: unitKey, attempt: unit.attempts,
-      requestedRuntime: requestedRuntimeId, actualRuntime: runtime.id,
+      requestedRuntime: requestedRuntimeId, actualRuntime: unitRuntime.id,
     });
 
     const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
     const promptPath = resolveWithin(promptsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.md`);
+    const logPath = resolveWithin(logsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.log`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
-    let result = await runtime.runStage({
+    let result = await unitRuntime.runStage({
       owner: spec.owner, instructions: prompt,
       workspaceDir, unitKey,
       outputs: spec.outputs, timeoutMs: 600_000,
-      model: resolveModel(spec, workflow), promptPath,
+      command: spec.command,
+      model: resolveModel(spec, workflow), promptPath, logPath,
     });
 
     // Rate limits back off and re-run without consuming an attempt.
@@ -178,10 +183,11 @@ async function runUnit(
       backoffs += 1;
       await appendEvent(workspaceDir, { type: "unit_backoff", key: unitKey, backoffs });
       await sleep(opts.backoffMs ?? 1000);
-      result = await runtime.runStage({
+      result = await unitRuntime.runStage({
         workspaceDir, unitKey, owner: spec.owner, instructions: prompt,
         outputs: spec.outputs, timeoutMs: 600_000,
-        model: resolveModel(spec, workflow), promptPath,
+        command: spec.command,
+        model: resolveModel(spec, workflow), promptPath, logPath,
       });
     }
 
@@ -196,7 +202,7 @@ async function runUnit(
     }
 
     if (result.outcome === "success") {
-      const report = await runValidators(spec.validators, spec.outputs, workspaceDir);
+      const report = await runValidators(spec.validators, spec.outputs, workspaceDir, spec.validator_commands);
       await appendValidationReport(workspaceDir, unitKey, report.findings, report.pass);
       if (report.pass) {
         unit.status = "succeeded";
@@ -233,11 +239,13 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     outputs: stage.outputs,
     tools: stage.tools,
     validators: stage.validators,
+    validator_commands: stage.validator_commands,
     requires_human_approval: stage.requires_human_approval,
     retry: stage.retry,
     runtime: stage.runtime,
     model: stage.model,
     model_tier: stage.model_tier,
+    command: stage.command,
   };
 }
 
@@ -255,11 +263,13 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     outputs: step.outputs.map(mapPath),
     tools: step.tools,
     validators: step.validators,
+    validator_commands: step.validator_commands,
     requires_human_approval: step.requires_human_approval,
     retry: step.retry,
     runtime: step.runtime,
     model: step.model,
     model_tier: step.model_tier,
+    command: step.command,
   };
 }
 

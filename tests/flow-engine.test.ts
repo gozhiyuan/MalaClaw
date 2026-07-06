@@ -165,6 +165,31 @@ describe("runFlow", () => {
     expect(state.status).toBe("completed");
     expect(state.units["items.draft[section-1]"].status).toBe("succeeded");
   });
+
+  it("dispatches a stage to the script runtime when requested", async () => {
+    const ws = await makeWorkspace();
+    const script = path.join(ws, "write-plan.mjs");
+    await fs.writeFile(script, "import fs from 'node:fs/promises'; await fs.writeFile('plan.md', '# plan');\n", "utf-8");
+    const wf = WorkflowDef.parse({
+      stages: [
+        {
+          id: "plan",
+          owner: "pm",
+          runtime: "script",
+          command: { cmd: process.execPath, args: [script] },
+          outputs: ["plan.md"],
+          validators: ["required_output_exists", "non_empty_markdown"],
+        },
+        { id: "build", owner: "pm", inputs: ["plan.md"], outputs: ["result.md"] },
+      ],
+    });
+
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(state.status).toBe("completed");
+    expect(state.units.plan.actualRuntime).toBe("script");
+    expect(await fs.readFile(path.join(ws, "plan.md"), "utf-8")).toBe("# plan");
+    expect(state.units.build.actualRuntime).toBe("dry-run");
+  });
 });
 
 describe("getFlowStatus", () => {

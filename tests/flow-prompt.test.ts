@@ -12,6 +12,7 @@ describe("renderUnitPrompt", () => {
     outputs: ["plan.md"],
     tools: ["read_file", "write_file"],
     validators: ["required_output_exists"],
+    validator_commands: [{ cmd: "longwrite", args: ["validate", "research", "."] }],
   });
 
   it("renders the full stage contract", () => {
@@ -24,6 +25,8 @@ describe("renderUnitPrompt", () => {
     expect(prompt).toContain("Required outputs");
     expect(prompt).toContain("- plan.md");
     expect(prompt).toContain("- read_file");
+    expect(prompt).toContain("External validator commands");
+    expect(prompt).toContain("longwrite validate research .");
     expect(prompt).toContain("blocker");
   });
 

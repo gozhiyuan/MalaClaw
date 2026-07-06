@@ -6,6 +6,7 @@ export type PromptUnit = {
   outputs: string[];
   tools: string[];
   validators: string[];
+  validator_commands?: Array<{ cmd: string; args: string[] }>;
 };
 
 export type PromptContext = {
@@ -31,6 +32,10 @@ export function renderUnitPrompt(ctx: PromptContext): string {
   prompt += section("Required outputs", stage.outputs);
   prompt += section("Allowed tools", stage.tools);
   prompt += section("Validators that will check your outputs", stage.validators);
+  prompt += section(
+    "External validator commands that will run after built-ins",
+    (stage.validator_commands ?? []).map((command) => [command.cmd, ...command.args].join(" ")),
+  );
   prompt +=
     "Rules:\n" +
     "- Only write files listed under Required outputs (plus reports/).\n" +

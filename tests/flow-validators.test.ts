@@ -64,4 +64,18 @@ describe("runValidators", () => {
     expect(report.pass).toBe(false);
     expect(report.findings[0]).toContain("definitely_not_real");
   });
+
+  it("runs external validator commands", async () => {
+    const ws = await makeWorkspace({ "plan.md": "# plan" });
+    const pass = await runValidators([], ["plan.md"], ws, [
+      { cmd: process.execPath, args: ["-e", "process.exit(0)"] },
+    ]);
+    expect(pass.pass).toBe(true);
+
+    const fail = await runValidators([], ["plan.md"], ws, [
+      { cmd: process.execPath, args: ["-e", "console.error('bad citations'); process.exit(2)"] },
+    ]);
+    expect(fail.pass).toBe(false);
+    expect(fail.findings[0]).toContain("bad citations");
+  });
 });
