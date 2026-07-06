@@ -10,11 +10,15 @@ export type ClaudeCodeOptions = {
   argsOverride?: string[];
   /** Extra args appended to the defaults. */
   extraArgs?: string[];
-  /** Tool allowlist for headless runs; undeclared tools are denied, not prompted. */
+  /** Tool allowlist for headless runs; undeclared tools are denied, not prompted.
+   *  Bash is deliberately NOT in the defaults: an unattended worker reads
+   *  workspace artifacts (including web-fetched research content — a prompt
+   *  injection vector), so shell access is opt-in. Stages that need commands
+   *  should use the deterministic ScriptRuntime instead. */
   allowedTools?: string[];
 };
 
-const DEFAULT_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"];
+const DEFAULT_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"];
 
 /** Headless Claude Code worker: `claude -p` with fail-closed permissions.
  *  The rendered stage contract goes in via stdin (arg-length safe); the
