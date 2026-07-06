@@ -23,7 +23,7 @@ The bottleneck in multi-agent adoption is usually not raw model capability. It i
 | Runtime adapters | One project model for OpenClaw, Claude Code, Codex, and ClawTeam |
 | Team orchestration | Entry-point agents, reusable team graphs, and topology-aware coordination |
 | Workflow manifests | Declare stage-based workflows (`workflow:`) with owners, artifacts, validators, approval gates, and foreach item pipelines — validated by `malaclaw validate` |
-| Worker runtimes | Execute workflow stages through pluggable workers: `dry-run` (deterministic), `script` (structured commands), `claude-code` (headless `claude -p`), `codex` (`codex exec`) — select with `flow run --runtime <id>` or per-stage `runtime:` |
+| Worker runtimes | Execute workflow stages through pluggable workers: `dry-run` (deterministic), `script` (structured commands), `claude-code` (headless `claude -p`), `codex` (`codex exec`), `openai-compatible` / `openai-api` (single-output chat-completions worker) — select with `flow run --runtime <id>` or per-stage `runtime:` |
 | Skill management | Project-targeted skill sync, install, allowlisting, and env requirement checks |
 | Dashboard | Web UI for projects, agents, starter discovery, config review, and status checks |
 | Telemetry | Normalized per-agent status files across supported runtimes |
@@ -128,6 +128,30 @@ version: 1
 runtime: clawteam
 packs:
   - id: dev-company
+```
+
+Workflow execution uses a separate WorkerRuntime registry. In `workflow:`
+stages or `model_tiers`, use `dry-run`, `script`, `claude-code`, `codex`,
+`openai-compatible`, or `openai-api`. The OpenAI-compatible worker calls
+`/chat/completions` using `MALACLAW_OPENAI_BASE_URL` / `OPENAI_BASE_URL`,
+`MALACLAW_OPENAI_API_KEY` / `OPENAI_API_KEY`, and
+`MALACLAW_OPENAI_MODEL`. It writes one model response into one declared concrete
+output file; use `codex` or `claude-code` for multi-file editing stages.
+Check worker availability without spending model quota:
+
+```bash
+malaclaw flow runtimes
+malaclaw flow runtimes --runtime codex
+```
+
+Run a one-stage runtime smoke/eval and write a Markdown report under
+`reports/`:
+
+```bash
+malaclaw flow smoke-runtime --runtime dry-run
+malaclaw flow smoke-runtime --runtime codex
+malaclaw flow smoke-runtime --runtime claude-code
+malaclaw flow smoke-runtime --runtime openai-compatible
 ```
 
 ## Communication Topologies

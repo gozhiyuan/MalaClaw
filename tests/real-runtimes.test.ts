@@ -6,7 +6,7 @@ import { ClaudeCodeRuntime } from "../src/lib/workflow/runtimes/claude-code.js";
 import { CodexRuntime } from "../src/lib/workflow/runtimes/codex.js";
 import { classifyCliFailure, collectProducedFiles } from "../src/lib/workflow/runtimes/classify.js";
 import { runSubprocess } from "../src/lib/workflow/runtimes/subprocess.js";
-import { getWorkerRuntime } from "../src/lib/workflow/runtimes/registry.js";
+import { getWorkerRuntime, listWorkerRuntimes } from "../src/lib/workflow/runtimes/registry.js";
 
 const tempDirs: string[] = [];
 async function makeWorkspace(): Promise<string> {
@@ -185,6 +185,14 @@ describe("registry", () => {
   it("registers claude-code and codex", () => {
     expect(getWorkerRuntime("claude-code").id).toBe("claude-code");
     expect(getWorkerRuntime("codex").id).toBe("codex");
+    expect(listWorkerRuntimes().map((runtime) => runtime.id)).toEqual(expect.arrayContaining([
+      "dry-run",
+      "script",
+      "claude-code",
+      "codex",
+      "openai-compatible",
+      "openai-api",
+    ]));
   });
 });
 

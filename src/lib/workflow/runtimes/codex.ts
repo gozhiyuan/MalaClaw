@@ -51,6 +51,8 @@ export class CodexRuntime implements WorkerRuntime {
     const args = this.options.argsOverride ?? [
       "exec",
       "--sandbox", "workspace-write",
+      "--skip-git-repo-check",
+      "--ephemeral",
       ...(req.model ? ["-m", req.model] : []),
       ...(this.options.extraArgs ?? []),
       "-", // read the prompt from stdin

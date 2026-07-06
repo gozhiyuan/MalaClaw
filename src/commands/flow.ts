@@ -1,7 +1,8 @@
 import { loadManifest } from "../lib/loader.js";
 import { resolveManifest } from "../lib/resolver.js";
 import { runFlow, approveFlow, approveAllFlow, getFlowStatus } from "../lib/workflow/engine.js";
-import { getWorkerRuntime } from "../lib/workflow/runtimes/registry.js";
+import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
+import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
 
 export async function runFlowRun(opts: { runtime?: string; reset?: boolean }): Promise<void> {
   const workspaceDir = process.cwd();
@@ -64,6 +65,44 @@ export async function runFlowReport(): Promise<void> {
     console.log(`    approve with: malaclaw flow approve ${approval.id}`);
   }
   console.log("\nBatch approve with: malaclaw flow review --batch");
+}
+
+export async function runFlowRuntimes(opts: { runtime?: string }): Promise<void> {
+  const runtimes = opts.runtime ? [getWorkerRuntime(opts.runtime)] : listWorkerRuntimes();
+  console.log("# Worker runtimes\n");
+  for (const runtime of runtimes) {
+    const health = await runtime.checkAvailable();
+    console.log(`- ${runtime.id}: ${health.available ? "available" : "unavailable"}`);
+    console.log(`  headless: ${health.supports_headless ? "yes" : "no"}`);
+    console.log(`  max_concurrent: ${health.max_concurrent ?? "unknown"}`);
+    console.log(`  isolated_workspace: ${health.requires_isolated_workspace ? "required" : "no"}`);
+    if (health.detail) console.log(`  detail: ${health.detail}`);
+  }
+}
+
+export async function runFlowRuntimeSmoke(opts: {
+  runtime: string;
+  workspace?: string;
+  reportDir?: string;
+  model?: string;
+  cleanup?: boolean;
+}): Promise<void> {
+  const result = await runRuntimeSmoke({
+    runtime: opts.runtime,
+    workspaceDir: opts.workspace,
+    reportDir: opts.reportDir,
+    model: opts.model,
+    keepWorkspace: !opts.cleanup,
+  });
+  console.log(`Runtime smoke report: ${result.reportPath}`);
+  console.log(`Workspace: ${result.workspaceDir}${opts.cleanup && !opts.workspace ? " (removed)" : ""}`);
+  console.log(`Flow status: ${result.state?.status ?? "not_run"}`);
+  console.log(`Artifact smoke.md: ${result.artifactExists ? "present" : "missing"}`);
+  if (!result.health.available) {
+    console.log(`Runtime unavailable: ${result.health.detail ?? result.runtime}`);
+    process.exit(1);
+  }
+  if (result.state?.status !== "completed" || !result.artifactExists) process.exit(1);
 }
 
 function printState(state: {

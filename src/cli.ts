@@ -396,6 +396,34 @@ flow
     await runFlowRun({ runtime: opts.runtime });
   });
 
+flow
+  .command("runtimes")
+  .description("Check worker runtime availability")
+  .option("--runtime <id>", "Only check one runtime")
+  .action(async (opts) => {
+    const { runFlowRuntimes } = await import("./commands/flow.js");
+    await runFlowRuntimes({ runtime: opts.runtime });
+  });
+
+flow
+  .command("smoke-runtime")
+  .description("Run a one-stage smoke workflow against a worker runtime")
+  .requiredOption("--runtime <id>", "Worker runtime to smoke, e.g. dry-run, codex, claude-code, openai-compatible")
+  .option("--workspace <dir>", "Workspace to use; defaults to a temporary directory")
+  .option("--report-dir <dir>", "Directory for the Markdown smoke report", "reports")
+  .option("--model <model>", "Model override for runtimes that support it")
+  .option("--cleanup", "Remove the generated temporary workspace after the run")
+  .action(async (opts) => {
+    const { runFlowRuntimeSmoke } = await import("./commands/flow.js");
+    await runFlowRuntimeSmoke({
+      runtime: opts.runtime,
+      workspace: opts.workspace,
+      reportDir: opts.reportDir,
+      model: opts.model,
+      cleanup: opts.cleanup,
+    });
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 
 program
