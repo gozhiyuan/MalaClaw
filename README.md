@@ -23,6 +23,7 @@ The bottleneck in multi-agent adoption is usually not raw model capability. It i
 | Runtime adapters | One project model for OpenClaw, Claude Code, Codex, and ClawTeam |
 | Team orchestration | Entry-point agents, reusable team graphs, and topology-aware coordination |
 | Workflow manifests | Declare stage-based workflows (`workflow:`) with owners, artifacts, validators, approval gates, and foreach item pipelines — validated by `malaclaw validate` |
+| Worker runtimes | Execute workflow stages through pluggable workers: `dry-run` (deterministic), `script` (structured commands), `claude-code` (headless `claude -p`), `codex` (`codex exec`) — select with `flow run --runtime <id>` or per-stage `runtime:` |
 | Skill management | Project-targeted skill sync, install, allowlisting, and env requirement checks |
 | Dashboard | Web UI for projects, agents, starter discovery, config review, and status checks |
 | Telemetry | Normalized per-agent status files across supported runtimes |

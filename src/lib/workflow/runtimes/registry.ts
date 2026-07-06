@@ -1,4 +1,6 @@
 import type { WorkerRuntime } from "./base.js";
+import { ClaudeCodeRuntime } from "./claude-code.js";
+import { CodexRuntime } from "./codex.js";
 import { DryRunRuntime } from "./dry-run.js";
 import { ScriptRuntime } from "./script.js";
 
@@ -22,3 +24,5 @@ export function getWorkerRuntime(id: string): WorkerRuntime {
 
 registerWorkerRuntime(new DryRunRuntime());
 registerWorkerRuntime(new ScriptRuntime());
+registerWorkerRuntime(new ClaudeCodeRuntime());
+registerWorkerRuntime(new CodexRuntime());

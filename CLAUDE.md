@@ -38,7 +38,8 @@ malaclaw/
 │       ├── manifest-validate.ts ← validateProjectManifest() for `malaclaw validate`
 │       ├── workflow/       ← Flow engine: validate, state, engine (foreach scheduler,
 │       │   │                  review queue), foreach, prompt, validators, safe-paths
-│       │   └── runtimes/   ← WorkerRuntime contract, registry, DryRunRuntime
+│       │   └── runtimes/   ← WorkerRuntime contract + registry; dry-run, script,
+│       │                      claude-code (claude -p), codex (codex exec) workers
 │       ├── openclaw-agents.ts ← Discover native OpenClaw agents from openclaw.json
 │       ├── openclaw-skills.ts ← Discover native OpenClaw skills for skill sync
 │       └── adapters/
