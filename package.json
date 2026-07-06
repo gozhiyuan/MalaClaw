@@ -1,7 +1,7 @@
 {
   "name": "malaclaw",
   "version": "1.0.0",
-  "description": "Runtime-agnostic agent team templates and CLI installer for multi-agent projects",
+  "description": "Workflow and runtime control plane for long-running multi-agent projects",
   "type": "module",
   "license": "MIT",
   "author": "gozhiyuan",

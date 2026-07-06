@@ -1,320 +1,269 @@
 # MalaClaw
 
-`malaclaw` is a runtime-agnostic project layer for multi-agent teams.
+MalaClaw is a workflow and runtime control plane for long-running multi-agent
+projects.
 
-It helps you go from an idea, an existing prompt-and-skill workflow, or a starter demo to a managed project that can run on OpenClaw, Claude Code, Codex, or ClawTeam.
+It turns a project-local `malaclaw.yaml` into a resumable flow with file-backed
+state, approval gates, validators, bounded retries, foreach fanout, and
+pluggable workers such as Claude Code, Codex, deterministic scripts, and
+OpenAI-compatible chat servers.
 
-The bottleneck in multi-agent adoption is usually not raw model capability. It is turning scattered prompts, skills, and experiments into a repeatable project with the right entry point, team structure, runtime setup, and operator guidance.
+The first flagship consumer is LongWrite Agent: an AutoResearch-style long-form
+writing workflow that uses MalaClaw for orchestration and worker runtime
+dispatch.
 
-## Why MalaClaw
+## What It Is
 
-- Start from natural language instead of forcing users to design YAML first.
-- Move from ad hoc prompting to a reusable managed project without rebuilding from scratch.
-- Keep the project model portable across multiple agent runtimes.
-- Separate authoring from runtime provisioning, so one manifest can target different execution environments.
-- Make team setup, skill targeting, and coordination rules inspectable instead of hidden in one-off prompts.
+MalaClaw has two related surfaces:
+
+| Surface | Purpose |
+| --- | --- |
+| Workflow engine | Runs `workflow:` stages with state, retries, approvals, validators, foreach parallelism, revision loops, and runtime dispatch. |
+| Project provisioners | Render agent/team workspaces for OpenClaw, Claude Code, Codex, and ClawTeam. This is useful, but no longer the only product center. |
+
+This split matters:
+
+- **Worker runtimes** execute workflow units: `dry-run`, `script`,
+  `claude-code`, `codex`, `openai-compatible`, `openai-api`.
+- **Provisioning runtimes** install/render team workspaces: `openclaw`,
+  `claude-code`, `codex`, `clawteam`.
+
+OpenClaw support remains a first-class adapter, but MalaClaw is now broader than
+an OpenClaw installer.
 
 ## Feature Highlights
 
 | Area | What it gives you |
-|---|---|
-| Starter catalog | Curated demo projects that map real use cases to packs, teams, and required skills |
-| Project bootstrap | Zero-config OpenClaw bootstrap or manifest-driven project install |
-| Runtime adapters | One project model for OpenClaw, Claude Code, Codex, and ClawTeam |
-| Team orchestration | Entry-point agents, reusable team graphs, and topology-aware coordination |
-| Workflow manifests | Declare stage-based workflows (`workflow:`) with owners, artifacts, validators, approval gates, and foreach item pipelines — validated by `malaclaw validate` |
-| Worker runtimes | Execute workflow stages through pluggable workers: `dry-run` (deterministic), `script` (structured commands), `claude-code` (headless `claude -p`), `codex` (`codex exec`), `openai-compatible` / `openai-api` (single-output chat-completions worker) — select with `flow run --runtime <id>` or per-stage `runtime:` |
-| Skill management | Project-targeted skill sync, install, allowlisting, and env requirement checks |
-| Dashboard | Web UI for projects, agents, starter discovery, config review, and status checks |
-| Telemetry | Normalized per-agent status files across supported runtimes |
-| Validation | `diff`, `validate`, and `doctor` flows for safer installs and troubleshooting |
-
-## Example Use Cases
-
-- Podcast production pipelines with research, outlines, show notes, and promotion assets.
-- Research workflows for earnings calls, market tracking, or technical news.
-- Existing OpenClaw repos that need to be promoted into a structured multi-agent project.
-- Personal assistant, automation, finance, customer-service, and data-ops setups.
-- Runtime-portable teams you want to provision into OpenClaw today and ClawTeam or Codex later.
+| --- | --- |
+| Workflow manifests | Declarative `workflow:` stages with owners, inputs, outputs, tools, validators, approvals, foreach item pipelines, and runtime/model overrides. |
+| Flow engine | Resumable execution with `.malaclaw/flow/state.json`, event logs, checkpoints, retry handling, approval queues, and blocker reports. |
+| Worker runtimes | `dry-run`, `script`, `claude-code`, `codex`, `openai-compatible`, and `openai-api`. |
+| Runtime checks | `malaclaw flow runtimes` checks worker availability without spending model quota. |
+| Runtime smoke/eval | `malaclaw flow smoke-runtime --runtime <id>` runs a one-stage workflow and writes a Markdown report. |
+| Deterministic tools | `script` stages run structured commands without shell interpolation. |
+| Project adapters | Optional install/provisioning into OpenClaw, Claude Code, Codex, and ClawTeam workspaces. |
+| Teams and packs | Reusable agent/team templates, starter catalog, skill targeting, topology guidance, and telemetry. |
 
 ## Quick Start
 
-### 1. Test the updated repo locally
-
-From the repo root:
-
 ```bash
-cd MalaClaw
 npm install
 npm run build
 npm test
-node dist/cli.js --help
 ```
 
-If you want the CLI on your `PATH` while testing:
+Check worker runtime availability:
 
 ```bash
-npm link
-malaclaw --help
+node dist/cli.js flow runtimes
+node dist/cli.js flow runtimes --runtime codex
 ```
 
-For a fuller local testing guide, including safe smoke tests and starter-based flows, see [docs/local-development.md](./docs/local-development.md).
+Run no-cost and real-runtime smoke checks:
 
-### 2. Bootstrap from OpenClaw
+```bash
+node dist/cli.js flow smoke-runtime --runtime dry-run --cleanup
+node dist/cli.js flow smoke-runtime --runtime codex --cleanup
+```
 
-If you are already using OpenClaw, the recommended entry point is to let OpenClaw follow the bundled manager skill:
+The smoke command writes reports like:
 
 ```text
-Please follow this SKILL.md to install malaclaw-cook for me and bootstrap malaclaw:
-
-- local file: skills/malaclaw-cook/SKILL.md
-- or repo URL: https://github.com/gozhiyuan/MalaClaw/blob/main/skills/malaclaw-cook/SKILL.md
+reports/runtime-smoke-codex-<timestamp>.md
 ```
 
-Or use the CLI bootstrap directly:
+## Workflow Example
+
+Add a `workflow:` block to `malaclaw.yaml`:
+
+```yaml
+version: 1
+runtime: codex
+project:
+  id: mini-survey
+  name: Mini Survey
+workflow:
+  runtime_policy:
+    primary: dry-run
+  stages:
+    - id: outline
+      owner: writer
+      outputs:
+        - outline.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+      requires_human_approval: true
+    - id: draft
+      owner: writer
+      inputs:
+        - outline.md
+      outputs:
+        - draft.md
+      runtime: codex
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+```
+
+Run it:
 
 ```bash
-malaclaw install
+malaclaw validate
+malaclaw flow run --runtime dry-run
+malaclaw flow status
+malaclaw flow approve approve-outline-001
+malaclaw flow run --runtime codex
 ```
 
-If there is no `malaclaw.yaml`, `malaclaw` does a zero-config bootstrap instead of failing. It installs the bundled `malaclaw-cook` skill into your main OpenClaw workspace and updates the main guidance files.
+## Worker Runtimes
 
-### 3. Try a starter project
+| Runtime | Use When | Notes |
+| --- | --- | --- |
+| `dry-run` | Tests, CI, contract checks | Writes placeholder artifacts; no model cost. |
+| `script` | Deterministic tools and data preparation | Runs structured `cmd` + `args`; no shell interpolation. |
+| `claude-code` | Real Claude Code headless work | Uses `claude -p`; model comes from stage `model:` or Claude CLI default. |
+| `codex` | Real Codex headless work | Uses `codex exec`; suitable for file-editing stages. |
+| `openai-compatible` | Cheap/local single-output text stages | Calls `/chat/completions`; writes one response into one concrete output. |
+| `openai-api` | Alias for hosted OpenAI-compatible use | Uses the same runtime implementation as `openai-compatible`. |
+
+OpenAI-compatible environment variables:
 
 ```bash
-malaclaw starter list
-malaclaw starter suggest "podcast workflow"
-malaclaw starter init podcast-production-pipeline ./my-podcast-project
-cd ./my-podcast-project
-malaclaw install
-malaclaw doctor
+export MALACLAW_OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+export MALACLAW_OPENAI_API_KEY=...
+export MALACLAW_OPENAI_MODEL=...
 ```
 
-### 4. Start from an existing repo
+For local servers, `MALACLAW_OPENAI_API_KEY` is optional when the base URL is
+localhost.
 
-```bash
-cd ./my-project
-malaclaw init
-malaclaw install --dry-run
-malaclaw install
-```
+## Provisioning Adapters
 
-`malaclaw init` creates `malaclaw.yaml`, and `install` reconciles that manifest into runtime-specific workspaces.
+Set top-level `runtime:` when you want MalaClaw to render/install team
+workspaces:
 
-## What MalaClaw Gives You
-
-- Starter demos that map ideas to reusable project scaffolds.
-- Reusable packs and team templates with clear entry-point agents.
-- Skill targeting rules so the right agents get the right tools.
-- Runtime adapters for OpenClaw, Claude Code, Codex, and ClawTeam.
-- Topology-aware teams that can stay simple or scale into structured coordination.
-- A built-in dashboard for inspecting projects, agents, starters, and config state.
-
-## Supported Runtimes
-
-Set `runtime:` in `malaclaw.yaml` to target the desired runtime.
-
-| Runtime | Manifest value | Install result |
-|---|---|---|
-| OpenClaw | `openclaw` | Patches `~/.openclaw/openclaw.json` and creates agent workspace dirs |
-| Claude Code | `claude-code` | Generates `CLAUDE.md` per agent workspace |
-| Codex | `codex` | Generates `AGENTS.md` per agent workspace |
-| ClawTeam | `clawteam` | Exports `team.toml` and a spawn catalog for native orchestration |
+| Runtime | Manifest Value | Install Result |
+| --- | --- | --- |
+| OpenClaw | `openclaw` | Patches `~/.openclaw/openclaw.json` and creates agent workspaces. |
+| Claude Code | `claude-code` | Generates `CLAUDE.md` for managed workspaces. |
+| Codex | `codex` | Generates `AGENTS.md` for managed workspaces. |
+| ClawTeam | `clawteam` | Exports `team.toml` and a spawn catalog. |
 
 Example:
 
 ```yaml
 version: 1
-runtime: clawteam
+runtime: claude-code
 packs:
   - id: dev-company
 ```
 
-Workflow execution uses a separate WorkerRuntime registry. In `workflow:`
-stages or `model_tiers`, use `dry-run`, `script`, `claude-code`, `codex`,
-`openai-compatible`, or `openai-api`. The OpenAI-compatible worker calls
-`/chat/completions` using `MALACLAW_OPENAI_BASE_URL` / `OPENAI_BASE_URL`,
-`MALACLAW_OPENAI_API_KEY` / `OPENAI_API_KEY`, and
-`MALACLAW_OPENAI_MODEL`. It writes one model response into one declared concrete
-output file; use `codex` or `claude-code` for multi-file editing stages.
-Check worker availability without spending model quota:
+Then:
 
 ```bash
-malaclaw flow runtimes
-malaclaw flow runtimes --runtime codex
+malaclaw install --dry-run
+malaclaw install
 ```
 
-Run a one-stage runtime smoke/eval and write a Markdown report under
-`reports/`:
+## LongWrite Relationship
 
-```bash
-malaclaw flow smoke-runtime --runtime dry-run
-malaclaw flow smoke-runtime --runtime codex
-malaclaw flow smoke-runtime --runtime claude-code
-malaclaw flow smoke-runtime --runtime openai-compatible
-```
-
-## Communication Topologies
-
-Each team can declare or auto-infer a topology that controls how agents coordinate.
-
-| Topology | Description | Runtime support |
-|---|---|---|
-| `star` | All tasks flow through the lead. Workers report only to the lead. | All runtimes |
-| `lead-reviewer` | Tasks flow through the lead, with explicit reviewer handoffs. | OpenClaw, ClawTeam |
-| `pipeline` | Work moves through staged agents in sequence. | ClawTeam only |
-| `peer-mesh` | Agents can coordinate laterally through shared memory. | ClawTeam only |
-
-If a topology is incompatible with the selected runtime, MalaClaw downgrades it to `star` with a warning. Use `malaclaw team show <id>` to inspect the resolved topology.
-
-## OpenClaw Workflow
-
-Once `malaclaw-cook` is installed, OpenClaw can guide three core paths:
-
-1. Demo project flow: pick a starter, check required skills and APIs, initialize the project, then install it.
-2. Promote-to-project flow: inspect an existing workflow, decide whether it should stay simple or become managed, then generate `malaclaw.yaml`.
-3. Customize-managed-project flow: retarget skills, swap packs, attach native agents, and rerun validation/install commands.
-
-That lets a user start with normal OpenClaw conversations and only adopt a managed project when the workflow is worth formalizing.
-
-## Common OpenClaw Prompts
+LongWrite is the writing product layer. MalaClaw is the runtime layer.
 
 ```text
-Show me demo projects for podcast production.
-I want to build a research workflow for earnings calls.
-Help me turn this repo into a managed project.
-Add a GitHub skill to this project.
-Should this stay single-agent or become a team?
+LongWrite mode/config
+  -> longwrite init
+  -> longwrite.yaml + malaclaw.yaml
+  -> malaclaw validate
+  -> malaclaw flow run
+  -> artifacts, reviews, reports, approvals
 ```
 
-## Bundled Catalog
-
-This repo currently includes:
-
-- 9 reusable packs in [`packs/`](./packs)
-- 37 starter demo projects in [`demo-projects/index.yaml`](./demo-projects/index.yaml)
-- 28 bundled skill templates in [`templates/skills/`](./templates/skills)
-- 1 bundled manager skill in [`skills/malaclaw-cook/`](./skills/malaclaw-cook)
-
-Useful discovery commands:
-
-```bash
-malaclaw starter list
-malaclaw starter show default-managed
-malaclaw team show dev-company
-malaclaw skill show malaclaw-cook
-```
-
-## Architecture
-
-MalaClaw uses YAML as its authoring layer, then compiles that into runtime-specific workspace files.
-
-High-level flow:
-
-1. Load agents, teams, packs, starters, and skill metadata.
-2. Resolve `malaclaw.yaml` into a concrete project plan.
-3. Render runtime-specific prompts and workspace files.
-4. Provision those files into the selected runtime.
-5. Track agent state through normalized telemetry.
-
-Mental model:
-
-- OpenClaw, Codex, Claude Code, and ClawTeam are runtimes.
-- MalaClaw is the project, install, and orchestration layer.
-- `malaclaw.yaml` is the control plane.
-- Rendered files such as `AGENTS.md`, `CLAUDE.md`, or `team.toml` are the runtime contract.
-
-For the full architecture and renderer pipeline, see [docs/how-it-works.md](./docs/how-it-works.md).
-
-## File Structure
-
-```text
-MalaClaw/
-├── src/                   # CLI commands and core install logic
-├── templates/
-│   ├── agents/            # agent definitions
-│   ├── teams/             # team graphs, topology, shared memory rules
-│   └── skills/            # skill metadata
-├── packs/                 # reusable bundles of teams and defaults
-├── starters/              # starter project definitions
-├── demo-projects/         # generated starter catalog and demo cards
-├── skills/malaclaw-cook/  # manager skill used by OpenClaw bootstrap
-├── dashboard/             # web dashboard
-├── partials/              # shared prompt fragments
-├── tests/                 # Vitest coverage for CLI and core libs
-└── docs/                  # architecture, workflow, and setup guides
-```
-
-Important project state:
-
-| File | Purpose |
-|---|---|
-| `malaclaw.yaml` | Desired project state: runtime, packs, skills, and project metadata |
-| `malaclaw.lock` | Resolved install state |
-| `demo-projects/index.yaml` | Starter catalog metadata |
-| `skills/malaclaw-cook/SKILL.md` | OpenClaw-facing manager skill entry point |
-
-## Skills and Runtime Boundary
-
-Skills can exist in two places for two different reasons:
-
-1. OpenClaw-owned installation: a skill is installed into OpenClaw so the runtime can use it.
-2. Project-targeted materialization: MalaClaw discovers available skills and places them into the managed agent workspaces that need them.
-
-So a user can install skills directly in OpenClaw first, then later let MalaClaw discover and target those skills inside a managed project.
-
-## Telemetry
-
-After install, MalaClaw tracks agent status through normalized files at `~/.malaclaw/agents/<agentId>/state.json`.
-
-This lets the dashboard and status tooling read a runtime-agnostic status model even when the underlying data comes from different runtime observers.
+MalaClaw deliberately does not own writing-specific concepts such as citation
+plans, novel bibles, or manuscript validation. It owns generic workflow
+execution.
 
 ## Useful Commands
 
 ```bash
-# bootstrap and install
-malaclaw install
-malaclaw install --dry-run
-malaclaw diff
-malaclaw doctor
-malaclaw dashboard
-
-# starter catalog
-malaclaw starter list
-malaclaw starter suggest "<idea>"
-malaclaw starter show <id>
-malaclaw starter init <id> <dir>
-
-# workflow flows
+# workflow engine
+malaclaw validate
 malaclaw flow run
 malaclaw flow status
-malaclaw flow approve <id>
+malaclaw flow approve <approval-id>
 malaclaw flow report
 malaclaw flow review --batch
 malaclaw flow continue
+malaclaw flow runtimes
+malaclaw flow smoke-runtime --runtime codex
 
-# manifests, teams, agents, and skills
+# project provisioning
 malaclaw init
-malaclaw project list
-malaclaw project show <id>
+malaclaw install --dry-run
+malaclaw install
+malaclaw diff
+malaclaw doctor
+
+# catalog and templates
+malaclaw starter list
+malaclaw starter suggest "<idea>"
+malaclaw starter init <id> <dir>
 malaclaw team show <id>
 malaclaw agent show <id>
 malaclaw skill show <id>
-malaclaw skill sync
-malaclaw validate
+
+# dashboard
+malaclaw dashboard
 ```
+
+## Repository Layout
+
+```text
+src/lib/workflow/          # workflow engine, state, validators, runtime dispatch
+src/lib/workflow/runtimes/ # dry-run, script, claude-code, codex, OpenAI-compatible
+src/lib/adapters/          # install/provisioning adapters
+templates/                 # reusable agents, teams, and skill metadata
+packs/                     # reusable team bundles
+starters/                  # curated starter manifests
+demo-projects/             # generated starter catalog and cards
+skills/malaclaw-cook/      # optional OpenClaw-facing manager skill
+dashboard/                 # optional web dashboard
+docs/                      # current docs and archived implementation plans
+```
+
+## Current MVP Status
+
+Implemented:
+
+- strict workflow schema and semantic validation,
+- file-backed flow state and event logs,
+- ordered stages and foreach item pipelines,
+- approval gates and batch review,
+- retries, blocker reports, and validation reports,
+- bounded revision loops with `max_rounds` + `stop_when`,
+- real worker runtimes for Claude Code and Codex,
+- deterministic `script` runtime,
+- OpenAI-compatible single-output runtime,
+- runtime smoke/eval reports.
+
+Still intentionally post-MVP:
+
+- arbitrary DAG scheduling,
+- automatic OS scheduler installation,
+- policy-based auto-approval,
+- full cost-budget enforcement and automatic fallback dispatch,
+- UI-first workflow authoring.
 
 ## Documentation
 
-- [docs/getting-started.md](./docs/getting-started.md): step-by-step demo setup, multi-runtime testing, dashboard verification, and customization
-- [docs/local-development.md](./docs/local-development.md): how to build, test, and smoke-check the updated repo
-- [docs/repo-workflow.md](./docs/repo-workflow.md): end-to-end repo usage and starter flows
-- [docs/how-it-works.md](./docs/how-it-works.md): architecture, adapters, telemetry, and renderer model
-- [docs/remote-access.md](./docs/remote-access.md): remote dashboard access options
+- [docs/getting-started.md](./docs/getting-started.md)
+- [docs/workflow-runtime.md](./docs/workflow-runtime.md)
+- [docs/local-development.md](./docs/local-development.md)
+- [docs/repo-workflow.md](./docs/repo-workflow.md)
+- [docs/how-it-works.md](./docs/how-it-works.md)
+- [docs/remote-access.md](./docs/remote-access.md)
 
 ## Reference Work
-
-This repo builds on and is inspired by the surrounding OpenClaw ecosystem:
 
 - [OpenClaw](https://github.com/openclaw/openclaw)
 - [antfarm](https://github.com/snarktank/antfarm)

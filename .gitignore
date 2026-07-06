@@ -13,3 +13,6 @@ dashboard/server/**/*.d.ts
 dashboard/test-results/
 dashboard/playwright-report/
 *.tsbuildinfo
+
+docs/plans/
+docs/superpowers/

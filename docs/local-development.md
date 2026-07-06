@@ -1,152 +1,99 @@
-# Local Development and Testing
+# Local Development
 
-This guide is the fastest way to verify that an updated `MalaClaw` checkout still builds, passes tests, and can bootstrap a real workflow.
+Use this checklist after changing MalaClaw.
 
-## Prerequisites
-
-- Node.js 22 or newer
-- `npm`
-- OpenClaw installed if you want to test the OpenClaw bootstrap path
-
-## 1. Install dependencies and build the CLI
-
-From the repo root:
+## Build and Test
 
 ```bash
-cd MalaClaw
 npm install
 npm run build
-```
-
-This compiles the CLI to `dist/cli.js`.
-
-## 2. Run the automated test suite
-
-```bash
 npm test
 ```
 
-Optional:
+If your system Node is too old, use a Node 22 runtime.
 
-```bash
-npm run test:watch
-npm run test:coverage
-```
+## Safe CLI Smoke
 
-## 3. Smoke test the built CLI
-
-Without linking globally:
+These commands avoid provider cost and avoid writing OpenClaw config:
 
 ```bash
 node dist/cli.js --help
-node dist/cli.js starter list
-node dist/cli.js team show dev-company
 node dist/cli.js validate
+node dist/cli.js flow runtimes
+node dist/cli.js flow smoke-runtime --runtime dry-run --cleanup
 ```
 
-If you want `malaclaw` available as a shell command during testing:
+If Codex or Claude Code is installed and quota is available:
 
 ```bash
-npm link
-malaclaw --help
-malaclaw starter list
+node dist/cli.js flow runtimes --runtime codex
+node dist/cli.js flow smoke-runtime --runtime codex --cleanup
+
+node dist/cli.js flow runtimes --runtime claude-code
+node dist/cli.js flow smoke-runtime --runtime claude-code --cleanup
 ```
 
-## 4. Safe install preview
+Smoke reports are written under `reports/`.
 
-If you want to confirm the install path without writing workspace files yet:
+## Workflow Fixture Smoke
+
+Create a temporary project:
 
 ```bash
-malaclaw install --dry-run
+tmp=$(mktemp -d /tmp/malaclaw-dev-XXXXXX)
+cd "$tmp"
+cat > malaclaw.yaml <<'YAML'
+version: 1
+project:
+  id: dev-smoke
+workflow:
+  stages:
+    - id: plan
+      owner: lead
+      outputs: [plan.md]
+      validators: [required_output_exists, non_empty_markdown]
+YAML
+
+node /path/to/MalaClaw/dist/cli.js validate
+node /path/to/MalaClaw/dist/cli.js flow run --runtime dry-run
+node /path/to/MalaClaw/dist/cli.js flow status
 ```
 
-If you are testing from an existing project repo, run that command in the directory containing `malaclaw.yaml`.
+## Optional Provisioning Checks
 
-## 5. Test the OpenClaw bootstrap path
-
-Run this in a directory that does not contain `malaclaw.yaml`:
+These exercise the install/provisioning surface:
 
 ```bash
-malaclaw install
+node dist/cli.js starter list
+node dist/cli.js starter init podcast-production-pipeline /tmp/malaclaw-podcast
+cd /tmp/malaclaw-podcast
+node /path/to/MalaClaw/dist/cli.js install --dry-run
 ```
 
-This is a real install path. It writes to your OpenClaw setup, including `~/.openclaw/openclaw.json` and the main OpenClaw guidance files.
-
-Expected behavior:
-
-- `malaclaw` does zero-config bootstrap instead of failing
-- it installs the bundled `malaclaw-cook` skill into the main OpenClaw workspace
-- it updates the main OpenClaw guidance files
-
-Use this path when you want to start from OpenClaw first and let the manager skill guide the rest.
-
-## 6. Test a starter-based managed project
+Only run a real OpenClaw install when you intentionally want to write
+`~/.openclaw/openclaw.json`:
 
 ```bash
-malaclaw starter suggest "podcast workflow"
-malaclaw starter init podcast-production-pipeline ./tmp-podcast-project
-cd ./tmp-podcast-project
-malaclaw install
-malaclaw doctor
+node /path/to/MalaClaw/dist/cli.js install
 ```
 
-What this verifies:
-
-- starter discovery works
-- project scaffolding writes `malaclaw.yaml`
-- install can resolve the starter into managed workspaces
-- `doctor` can validate the resulting setup
-
-## 7. Test an existing repo promotion flow
-
-Inside the repo you want to manage:
+## Dashboard
 
 ```bash
-malaclaw init
-malaclaw install --dry-run
-malaclaw install
-malaclaw project show <project-id>
+scripts/build-dashboard.sh
+node dist/cli.js dashboard
 ```
 
-This is the path for turning an existing ad hoc workflow into a managed project.
+Open `http://localhost:3456`.
 
-## 8. Test a different runtime adapter
+## Documentation Checks
 
-Edit `malaclaw.yaml` and set:
-
-```yaml
-runtime: codex
-```
-
-or:
-
-```yaml
-runtime: clawteam
-```
-
-Then rerun:
+After changing public docs:
 
 ```bash
-malaclaw install
-malaclaw doctor
+rg -n "OpenClaw bootstrap|installer|workflow runtime|WorkerRuntime" README.md docs
+rg -n "generate-starters-from-usecases|awesome-openclaw-usecases" README.md docs scripts
 ```
 
-This verifies that the same project manifest can compile to a different runtime target.
-
-## Handy Commands
-
-```bash
-malaclaw diff
-malaclaw doctor
-malaclaw project list
-malaclaw project show <id>
-malaclaw agent list
-malaclaw skill check
-```
-
-## Related Docs
-
-- [./getting-started.md](./getting-started.md)
-- [../README.md](../README.md)
-- [./repo-workflow.md](./repo-workflow.md)
-- [./how-it-works.md](./how-it-works.md)
+OpenClaw should be described as an adapter path. The workflow engine should be
+the primary project scope.
