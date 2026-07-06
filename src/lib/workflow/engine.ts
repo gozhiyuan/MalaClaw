@@ -14,6 +14,7 @@ import {
 } from "./state.js";
 import { expandForeachItems, resolveItemTemplates } from "./foreach.js";
 import { resolveWithin } from "./safe-paths.js";
+import { evaluateStopCondition } from "./stop-condition.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
 import { getWorkerRuntime } from "./runtimes/registry.js";
@@ -133,10 +134,11 @@ async function runUnit(
   spec: WorkUnitSpec,
   opts: RunFlowOptions,
   state: FlowState,
+  initialFeedback?: string[],
 ): Promise<"succeeded" | "failed" | "paused"> {
   const { workspaceDir, workflow, runtime } = opts;
   const unitKey = spec.key;
-  state.units[unitKey] ??= { status: "pending", attempts: 0, approvalGranted: false };
+  state.units[unitKey] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
   const unit = state.units[unitKey];
   const maxAttempts = spec.retry?.max_attempts ?? 2;
   const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
@@ -146,7 +148,7 @@ async function runUnit(
 
   await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
 
-  let retryFeedback: string[] | undefined;
+  let retryFeedback: string[] | undefined = initialFeedback;
   let backoffs = 0;
 
   while (unit.attempts < maxAttempts) {
@@ -226,6 +228,63 @@ async function runUnit(
   unit.status = "failed";
   await appendEvent(workspaceDir, { type: "unit_failed", key: unitKey });
   return "failed";
+}
+
+/** Run a standard stage, honoring the bounded revision loop: `max_rounds`
+ *  re-runs the stage (fresh retry budget per round) until `stop_when`
+ *  evaluates true against reports/metrics.json or the cap is hit. Hitting
+ *  the cap unmet is bounded improvement, not failure — the flow proceeds
+ *  with a `revision_rounds_exhausted` event. */
+async function runStandardStage(
+  stage: StandardStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+): Promise<"succeeded" | "failed" | "paused"> {
+  const spec = stageToSpec(stage);
+  state.units[spec.key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
+  const unit = state.units[spec.key];
+  const maxRounds = stage.max_rounds ?? 1;
+  let lastCurrent: number | undefined;
+
+  while (unit.rounds < maxRounds) {
+    const roundNumber = unit.rounds + 1;
+    unit.attempts = 0; // fresh retry budget per round
+    unit.status = "pending";
+    const roundFeedback =
+      roundNumber === 1
+        ? undefined
+        : stage.stop_when
+          ? [
+              `Revision round ${roundNumber} of ${maxRounds}: stop condition "${stage.stop_when}" ` +
+              `not yet met${lastCurrent !== undefined ? ` (current: ${lastCurrent})` : ""}. ` +
+              `Improve the outputs and update reports/metrics.json.`,
+            ]
+          : [`Revision round ${roundNumber} of ${maxRounds}: improve the previous round's outputs.`];
+
+    const outcome = await runUnit(spec, opts, state, roundFeedback);
+    if (outcome !== "succeeded") return outcome;
+    unit.rounds += 1;
+
+    if (stage.stop_when) {
+      const evaluation = await evaluateStopCondition(opts.workspaceDir, stage.stop_when);
+      lastCurrent = evaluation.current;
+      if (evaluation.met) {
+        await appendEvent(opts.workspaceDir, {
+          type: "stop_condition_met", key: spec.key,
+          rounds: unit.rounds, current: evaluation.current,
+        });
+        return "succeeded";
+      }
+      if (unit.rounds >= maxRounds) {
+        await appendEvent(opts.workspaceDir, {
+          type: "revision_rounds_exhausted", key: spec.key,
+          rounds: unit.rounds, current: evaluation.current, condition: stage.stop_when,
+        });
+        return "succeeded";
+      }
+    }
+  }
+  return "succeeded";
 }
 
 function stageToSpec(stage: StandardStage): WorkUnitSpec {
@@ -318,7 +377,7 @@ async function ensureForeachExpansion(
     for (const itemId of state.foreachItems[stage.id]) {
       for (const step of stage.steps) {
         const key = `${stage.id}.${step.id}[${itemId}]`;
-        state.units[key] ??= { status: "pending", attempts: 0, approvalGranted: false };
+        state.units[key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
       }
     }
     await appendEvent(opts.workspaceDir, {
@@ -458,7 +517,7 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
     unit.status = "pending";
     const outcome = "steps" in stage
       ? await runForeachStage(stage, opts, state, runtimeMaxConcurrent)
-      : await runUnit(stageToSpec(stage), opts, state);
+      : await runStandardStage(stage, opts, state);
     await saveFlowState(workspaceDir, state);
 
     if (outcome === "failed") {

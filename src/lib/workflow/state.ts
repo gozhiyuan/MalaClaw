@@ -7,6 +7,8 @@ import { StageRunOutcome, type WorkflowDef } from "../schema.js";
 export const UnitState = z.object({
   status: z.enum(["pending", "running", "succeeded", "failed"]).default("pending"),
   attempts: z.number().int().default(0),
+  /** Completed revision rounds (max_rounds/stop_when loops). */
+  rounds: z.number().int().default(0),
   lastOutcome: StageRunOutcome.optional(),
   lastError: z.string().optional(),
   requestedRuntime: z.string().optional(),

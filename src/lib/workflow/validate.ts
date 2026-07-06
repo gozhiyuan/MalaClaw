@@ -1,4 +1,5 @@
 import type { WorkflowDef, WorkflowStage } from "../schema.js";
+import { parseStopCondition } from "./stop-condition.js";
 
 export type WorkflowValidationResult = {
   errors: string[];
@@ -65,6 +66,18 @@ export function validateWorkflowSemantics(
   const producedOutputs: string[] = [...workflow.external_inputs];
 
   for (const stage of workflow.stages) {
+    if (!("steps" in stage) && stage.stop_when) {
+      if (!stage.max_rounds) {
+        errors.push(
+          `Stage "${stage.id}": stop_when requires max_rounds (an unbounded loop is not allowed)`,
+        );
+      }
+      if (!parseStopCondition(stage.stop_when)) {
+        errors.push(
+          `Stage "${stage.id}": stop_when "${stage.stop_when}" is not a valid condition (<metric> <op> <number>)`,
+        );
+      }
+    }
     for (const unit of toWorkUnits(stage)) {
       if (!availableOwnerIds.has(unit.owner)) {
         errors.push(
