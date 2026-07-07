@@ -161,8 +161,13 @@ async function runUnit(
 
     const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
-    const promptPath = resolveWithin(promptsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.md`);
-    const logPath = resolveWithin(logsDir(workspaceDir), `${unitKey}-attempt${unit.attempts}.log`);
+    // Revision rounds reset the attempt counter, so tag the round to keep
+    // round 2 from overwriting round 1's prompt and log.
+    const fileTag = unit.rounds > 0
+      ? `${unitKey}-round${unit.rounds + 1}-attempt${unit.attempts}`
+      : `${unitKey}-attempt${unit.attempts}`;
+    const promptPath = resolveWithin(promptsDir(workspaceDir), `${fileTag}.md`);
+    const logPath = resolveWithin(logsDir(workspaceDir), `${fileTag}.log`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
     let result = await unitRuntime.runStage({

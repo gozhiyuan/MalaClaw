@@ -173,6 +173,24 @@ describe("engine rounds loop", () => {
     expect(prompt).toContain("review_score >= 9.5");
   });
 
+  it("keeps per-round prompt files instead of overwriting round 1", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        id: "revise", owner: "pm", outputs: ["draft.md"],
+        max_rounds: 3, stop_when: "review_score >= 9.5",
+      }],
+    });
+    await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(6, 0.5) });
+    const promptFiles = (await fs.readdir(path.join(ws, ".malaclaw/flow/prompts"))).sort();
+    // Rounds reset the attempt counter; the round tag keeps the files distinct.
+    expect(promptFiles).toEqual([
+      "revise-attempt1.md",
+      "revise-round2-attempt1.md",
+      "revise-round3-attempt1.md",
+    ]);
+  });
+
   it("resumes an interrupted loop with the remaining round budget", async () => {
     const ws = await makeWorkspace();
     const wf = WorkflowDef.parse({
