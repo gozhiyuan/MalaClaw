@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
 import { classifyCliFailure, collectProducedFiles } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
@@ -12,6 +13,15 @@ export type CodexOptions = {
   extraArgs?: string[];
 };
 
+const MACOS_CODEX_APP_BIN = "/Applications/Codex.app/Contents/Resources/codex";
+
+function defaultCodexBin(): string {
+  const envBin = process.env.MALACLAW_CODEX_BIN?.trim();
+  if (envBin) return envBin;
+  if (fs.existsSync(MACOS_CODEX_APP_BIN)) return MACOS_CODEX_APP_BIN;
+  return "codex";
+}
+
 /** Headless Codex worker: `codex exec` (non-interactive by design) with a
  *  workspace-write sandbox. The stage contract goes in via stdin. Flags
  *  current as of 2026-07 — adjust via options if the CLI changes. */
@@ -24,7 +34,7 @@ export class CodexRuntime implements WorkerRuntime {
   }
 
   private bin(): string {
-    return this.options.bin ?? "codex";
+    return this.options.bin ?? defaultCodexBin();
   }
 
   async checkAvailable(): Promise<RuntimeHealth> {

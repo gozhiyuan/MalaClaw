@@ -162,6 +162,30 @@ describe("ClaudeCodeRuntime (stubbed)", () => {
 });
 
 describe("CodexRuntime (stubbed)", () => {
+  it("uses MALACLAW_CODEX_BIN when the CLI is not on PATH", async () => {
+    const previous = process.env.MALACLAW_CODEX_BIN;
+    process.env.MALACLAW_CODEX_BIN = process.execPath;
+    try {
+      const rt = new CodexRuntime();
+      expect((await rt.checkAvailable()).available).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.MALACLAW_CODEX_BIN;
+      else process.env.MALACLAW_CODEX_BIN = previous;
+    }
+  });
+
+  it("keeps explicit bin option ahead of MALACLAW_CODEX_BIN", async () => {
+    const previous = process.env.MALACLAW_CODEX_BIN;
+    process.env.MALACLAW_CODEX_BIN = "/nonexistent/codex";
+    try {
+      const rt = new CodexRuntime({ bin: process.execPath });
+      expect((await rt.checkAvailable()).available).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.MALACLAW_CODEX_BIN;
+      else process.env.MALACLAW_CODEX_BIN = previous;
+    }
+  });
+
   it("succeeds on exit 0 and reports produced files", async () => {
     const ws = await makeWorkspace();
     const rt = new CodexRuntime(stub(
