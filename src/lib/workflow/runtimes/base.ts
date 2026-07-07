@@ -30,7 +30,13 @@ export type StageRunResult = {
   producedFiles: string[];
   message?: string;
   logRef?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; cost_usd?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    /** Some CLIs (codex) only report a combined total. */
+    total_tokens?: number;
+    cost_usd?: number;
+  };
 };
 
 /** The execution boundary. The engine owns scheduling, retries, validation,

@@ -22,6 +22,16 @@ function defaultCodexBin(): string {
   return "codex";
 }
 
+/** `codex exec` prints a "tokens used" trailer. The format varies by CLI
+ *  version: "tokens used: 1,234" on one line, or the number on the next line.
+ *  Returns the last match so intermediate progress lines don't win. */
+export function parseCodexTokensUsed(output: string): number | undefined {
+  const matches = [...output.matchAll(/tokens used:?\s*[\r\n]*\s*(\d[\d,]*)/gi)];
+  if (matches.length === 0) return undefined;
+  const value = Number(matches[matches.length - 1][1].replace(/,/g, ""));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 /** Headless Codex worker: `codex exec` (non-interactive by design) with a
  *  workspace-write sandbox. The stage contract goes in via stdin. Flags
  *  current as of 2026-07 — adjust via options if the CLI changes. */
@@ -84,10 +94,12 @@ export class CodexRuntime implements WorkerRuntime {
       return { outcome: "worker_error", producedFiles: [], message: result.spawnError, logRef: logPath };
     }
     if (result.code === 0) {
+      const totalTokens = parseCodexTokensUsed(result.output);
       return {
         outcome: "success",
         producedFiles: await collectProducedFiles(req.workspaceDir, req.outputs),
         logRef: logPath,
+        usage: totalTokens !== undefined ? { total_tokens: totalTokens } : undefined,
       };
     }
     return {

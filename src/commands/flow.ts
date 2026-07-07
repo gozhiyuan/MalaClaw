@@ -1,5 +1,6 @@
 import { loadManifest } from "../lib/loader.js";
 import { resolveManifest } from "../lib/resolver.js";
+import { readEvents } from "../lib/workflow/state.js";
 import { runFlow, approveFlow, approveAllFlow, getFlowStatus } from "../lib/workflow/engine.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
 import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
@@ -23,6 +24,7 @@ export async function runFlowRun(opts: { runtime?: string; reset?: boolean }): P
 
   const state = await runFlow({ workflow: resolved.workflow, workspaceDir, runtime, reset: opts.reset });
   printState(state);
+  await printUsageSummary(workspaceDir);
   if (state.status === "failed") process.exit(1);
 }
 
@@ -33,6 +35,7 @@ export async function runFlowStatus(): Promise<void> {
     return;
   }
   printState(state);
+  await printUsageSummary(process.cwd());
 }
 
 export async function runFlowApprove(approvalId: string): Promise<void> {
@@ -103,6 +106,42 @@ export async function runFlowRuntimeSmoke(opts: {
     process.exit(1);
   }
   if (result.state?.status !== "completed" || !result.artifactExists) process.exit(1);
+}
+
+type UsageEvent = {
+  type: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; cost_usd?: number };
+};
+
+/** Sum usage across unit_succeeded events. Retried attempts that failed carry
+ *  no usage event, so this understates true spend for flaky runs. */
+export async function summarizeUsage(workspaceDir: string): Promise<{
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  unitsWithUsage: number;
+}> {
+  const events = (await readEvents(workspaceDir)) as UsageEvent[];
+  const summary = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, unitsWithUsage: 0 };
+  for (const event of events) {
+    if (event.type !== "unit_succeeded" || !event.usage) continue;
+    summary.unitsWithUsage += 1;
+    summary.inputTokens += event.usage.input_tokens ?? 0;
+    summary.outputTokens += event.usage.output_tokens ?? 0;
+    summary.totalTokens +=
+      event.usage.total_tokens ?? (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0);
+    summary.costUsd += event.usage.cost_usd ?? 0;
+  }
+  return summary;
+}
+
+async function printUsageSummary(workspaceDir: string): Promise<void> {
+  const usage = await summarizeUsage(workspaceDir);
+  if (usage.unitsWithUsage === 0) return;
+  const parts = [`units: ${usage.unitsWithUsage}`, `tokens: ${usage.totalTokens.toLocaleString("en-US")}`];
+  if (usage.costUsd > 0) parts.push(`cost: $${usage.costUsd.toFixed(4)}`);
+  console.log(`  Σ usage — ${parts.join(", ")}`);
 }
 
 function printState(state: {

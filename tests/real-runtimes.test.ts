@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ClaudeCodeRuntime } from "../src/lib/workflow/runtimes/claude-code.js";
-import { CodexRuntime } from "../src/lib/workflow/runtimes/codex.js";
+import { CodexRuntime, parseCodexTokensUsed } from "../src/lib/workflow/runtimes/codex.js";
 import { classifyCliFailure, collectProducedFiles } from "../src/lib/workflow/runtimes/classify.js";
 import { runSubprocess } from "../src/lib/workflow/runtimes/subprocess.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../src/lib/workflow/runtimes/registry.js";
@@ -161,6 +161,21 @@ describe("ClaudeCodeRuntime (stubbed)", () => {
   });
 });
 
+describe("parseCodexTokensUsed", () => {
+  it("parses the number-on-next-line trailer with thousands separators", () => {
+    expect(parseCodexTokensUsed("...review text...\n\ntokens used\n17,936\nCreated the output.")).toBe(17_936);
+  });
+
+  it("parses the same-line colon format and prefers the last occurrence", () => {
+    expect(parseCodexTokensUsed("tokens used: 500\n...more work...\ntokens used: 1,200")).toBe(1_200);
+  });
+
+  it("returns undefined when no trailer is present", () => {
+    expect(parseCodexTokensUsed("no telemetry here")).toBeUndefined();
+    expect(parseCodexTokensUsed("tokens used\nnot-a-number")).toBeUndefined();
+  });
+});
+
 describe("CodexRuntime (stubbed)", () => {
   it("uses MALACLAW_CODEX_BIN when the CLI is not on PATH", async () => {
     const previous = process.env.MALACLAW_CODEX_BIN;
@@ -194,6 +209,16 @@ describe("CodexRuntime (stubbed)", () => {
     const result = await rt.runStage(request(ws));
     expect(result.outcome).toBe("success");
     expect(result.producedFiles).toEqual(["plan.md"]);
+  });
+
+  it("captures the tokens-used trailer as usage on success", async () => {
+    const ws = await makeWorkspace();
+    const rt = new CodexRuntime(stub(
+      `require('fs').writeFileSync('plan.md','# plan'); console.log('tokens used\\n17,936')`,
+    ));
+    const result = await rt.runStage(request(ws));
+    expect(result.outcome).toBe("success");
+    expect(result.usage).toEqual({ total_tokens: 17_936 });
   });
 
   it("classifies failures from output text", async () => {
