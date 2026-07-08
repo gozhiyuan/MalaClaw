@@ -21,10 +21,23 @@ beforeAll(async () => {
       "#!/usr/bin/env node",
       "const fs = require('node:fs');",
       "const path = require('node:path');",
-      "const workspace = process.argv[4];",
-      "fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
-      "fs.writeFileSync(path.join(workspace, 'reports', 'human-review-packet.md'), '# Packet\\n');",
-      "console.log('wrote packet');",
+      "const cmd = process.argv[2];",
+      "const workspace = cmd === 'report' ? process.argv[4] : process.argv[3];",
+      "if (cmd === 'report') {",
+      "  fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
+      "  fs.writeFileSync(path.join(workspace, 'reports', 'human-review-packet.md'), '# Packet\\n');",
+      "  console.log('wrote packet');",
+      "  process.exit(0);",
+      "}",
+      "if (cmd === 'run') {",
+      "  console.log('run started ' + process.argv.slice(2).join(' '));",
+      "  setTimeout(() => {",
+      "    fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
+      "    fs.writeFileSync(path.join(workspace, 'reports', 'stub-run.txt'), 'done\\n');",
+      "    console.log('run finished');",
+      "  }, 250);",
+      "  setTimeout(() => process.exit(0), 300);",
+      "}",
     ].join("\n"),
     "utf-8",
   );
@@ -125,6 +138,32 @@ describe("longwrite routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().stdout).toContain("wrote packet");
     expect(await fs.readFile(path.join(ws, "reports", "human-review-packet.md"), "utf-8")).toContain("Packet");
+  });
+
+  it("POST /api/longwrite/run starts one run per workspace and records output", async () => {
+    const started = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/run",
+      payload: { dir: ws, runtime: "dry-run" },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().operation.running).toBe(true);
+    expect(started.json().operation.args).toEqual(["run", ws, "--runtime", "dry-run"]);
+
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/run",
+      payload: { dir: ws, runtime: "dry-run" },
+    });
+    expect(duplicate.statusCode).toBe(409);
+
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const status = await app.inject({ method: "GET", url: `/api/longwrite?dir=${encodeURIComponent(ws)}` });
+    expect(status.statusCode).toBe(200);
+    expect(status.json().operation.running).toBe(false);
+    expect(status.json().operation.exitCode).toBe(0);
+    expect(status.json().operation.stdout).toContain("run finished");
+    expect(await fs.readFile(path.join(ws, "reports", "stub-run.txt"), "utf-8")).toContain("done");
   });
 
   it("shell-quotes command hints without allowing shell expansion", async () => {

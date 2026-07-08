@@ -34,6 +34,17 @@ type LongWriteResponse = {
   } | null;
   usage: { totalTokens: number; costUsd: number; unitsWithUsage: number } | null;
   logs: Array<{ name: string; content: string; truncated: boolean }>;
+  operation: {
+    running: boolean;
+    pid?: number;
+    startedAt: string;
+    finishedAt?: string;
+    exitCode?: number | null;
+    signal?: string | null;
+    args: string[];
+    stdout: string;
+    stderr: string;
+  } | null;
   commands: { status: string; run: string; approve: string; packet: string };
 };
 
@@ -104,6 +115,7 @@ export function LongWrite() {
   const [dir, setDir] = useState(() => localStorage.getItem("longwrite-dir") ?? "");
   const [input, setInput] = useState(dir);
   const [operationMessage, setOperationMessage] = useState<string | null>(null);
+  const [runtimeOverride, setRuntimeOverride] = useState("");
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useLongWrite(dir);
 
@@ -126,6 +138,16 @@ export function LongWrite() {
     onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
   });
 
+  const run = useMutation({
+    mutationFn: (body: { runtime?: string; reset?: boolean }) =>
+      postJson<{ ok: boolean; operation: LongWriteResponse["operation"] }>("/api/longwrite/run", { dir, ...body }),
+    onSuccess: (_, body) => {
+      setOperationMessage(body.reset ? "Started LongWrite reset run." : "Started LongWrite run.");
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
   const load = () => {
     localStorage.setItem("longwrite-dir", input);
     localStorage.setItem("malaclaw-flow-dir", input);
@@ -138,6 +160,8 @@ export function LongWrite() {
 
   const flowUnits = data?.flow ? Object.values(data.flow.units) : [];
   const succeeded = flowUnits.filter((unit) => unit.status === "succeeded").length;
+  const selectedRuntime = runtimeOverride.trim() || data?.workflow.runtime || undefined;
+  const runActive = data?.operation?.running === true;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 1120 }}>
@@ -212,6 +236,50 @@ export function LongWrite() {
 
           <Section title="Operations">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={runtimeOverride}
+                onChange={(e) => setRuntimeOverride(e.target.value)}
+                placeholder={data.workflow.runtime ? `runtime: ${data.workflow.runtime}` : "runtime override"}
+                disabled={runActive}
+                style={{
+                  minWidth: 180,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  fontFamily: "monospace",
+                  fontSize: 13,
+                  background: "#0d1117",
+                  color: "#c9d1d9",
+                  border: "1px solid #30363d",
+                }}
+              />
+              <button
+                onClick={() => run.mutate({ runtime: selectedRuntime })}
+                disabled={runActive || run.isPending}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #30363d",
+                  background: runActive ? "#21262d" : "#1f6feb",
+                  color: "#fff",
+                  cursor: runActive ? "not-allowed" : "pointer",
+                }}
+              >
+                Run
+              </button>
+              <button
+                onClick={() => run.mutate({ runtime: selectedRuntime, reset: true })}
+                disabled={runActive || run.isPending}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #30363d",
+                  background: runActive ? "#21262d" : "#8957e5",
+                  color: "#fff",
+                  cursor: runActive ? "not-allowed" : "pointer",
+                }}
+              >
+                Reset + run
+              </button>
               <button
                 onClick={() => approve.mutate({ batch: true })}
                 disabled={!data.flow?.pendingApprovals.length || approve.isPending}
@@ -267,6 +335,20 @@ export function LongWrite() {
             ) : (
               <div style={{ marginTop: 8, color: "#8b949e", fontSize: 13 }}>No pending approvals.</div>
             )}
+            {data.operation && (
+              <div style={{ marginTop: 10, color: "#8b949e", fontSize: 13 }}>
+                <div>
+                  <span style={{ color: data.operation.running ? "#d29922" : data.operation.exitCode === 0 ? "#3fb950" : "#f85149" }}>
+                    {data.operation.running ? "running" : `finished ${data.operation.exitCode ?? data.operation.signal ?? "unknown"}`}
+                  </span>
+                  {" "}started {data.operation.startedAt}
+                  {data.operation.pid ? ` · pid ${data.operation.pid}` : ""}
+                </div>
+                <code style={{ display: "block", marginTop: 4, color: "#c9d1d9" }}>
+                  longwrite {data.operation.args.join(" ")}
+                </code>
+              </div>
+            )}
           </Section>
 
           <Section title="Commands">
@@ -313,6 +395,25 @@ export function LongWrite() {
           </Section>
 
           <Section title="Recent logs">
+            {data.operation?.stdout || data.operation?.stderr ? (
+              <details open={data.operation.running} style={{ marginBottom: 8 }}>
+                <summary style={{ color: "#58a6ff", cursor: "pointer", fontFamily: "monospace", fontSize: 13 }}>
+                  dashboard-run output
+                </summary>
+                <pre style={{
+                  margin: "6px 0 0",
+                  padding: 10,
+                  maxHeight: 260,
+                  overflow: "auto",
+                  whiteSpace: "pre-wrap",
+                  background: "#0d1117",
+                  border: "1px solid #30363d",
+                  borderRadius: 6,
+                  color: data.operation.stderr ? "#f85149" : "#c9d1d9",
+                  fontSize: 12,
+                }}>{[data.operation.stdout, data.operation.stderr].filter(Boolean).join("\n")}</pre>
+              </details>
+            ) : null}
             {data.logs.length === 0 ? (
               <div style={{ color: "#8b949e", fontSize: 13 }}>No worker logs found.</div>
             ) : (

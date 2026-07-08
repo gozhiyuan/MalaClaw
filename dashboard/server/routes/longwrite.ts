@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -25,6 +25,21 @@ type StageSummary = {
 
 const LOG_TAIL_BYTES = 10_000;
 const MAX_OPERATION_OUTPUT = 20_000;
+const MAX_RUN_OUTPUT = 40_000;
+
+type RunRecord = {
+  running: boolean;
+  pid?: number;
+  startedAt: string;
+  finishedAt?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
+  args: string[];
+  stdout: string;
+  stderr: string;
+};
+
+const runRegistry = new Map<string, RunRecord>();
 
 async function readTextIfExists(absPath: string): Promise<string | null> {
   try {
@@ -155,6 +170,56 @@ function runLongWrite(args: string[], cwd: string): Promise<{ stdout: string; st
   });
 }
 
+function runStatus(workspaceDir: string): RunRecord | null {
+  return runRegistry.get(workspaceDir) ?? null;
+}
+
+function appendTail(current: string, chunk: Buffer, maxBytes: number): string {
+  return (current + chunk.toString()).slice(-maxBytes);
+}
+
+function spawnLongWriteRun(workspaceDir: string, opts: { runtime?: string; reset?: boolean }): RunRecord {
+  const existing = runRegistry.get(workspaceDir);
+  if (existing?.running) {
+    throw Object.assign(new Error("LongWrite run is already active for this workspace"), { statusCode: 409 });
+  }
+
+  const args = ["run", workspaceDir];
+  if (opts.runtime) args.push("--runtime", opts.runtime);
+  if (opts.reset) args.push("--reset");
+
+  const child: ChildProcessWithoutNullStreams = spawn(longwriteBin(), args, { cwd: workspaceDir, shell: false });
+  const record: RunRecord = {
+    running: true,
+    pid: child.pid,
+    startedAt: new Date().toISOString(),
+    args,
+    stdout: "",
+    stderr: "",
+  };
+  runRegistry.set(workspaceDir, record);
+
+  child.stdout.on("data", (chunk: Buffer) => {
+    record.stdout = appendTail(record.stdout, chunk, MAX_RUN_OUTPUT);
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    record.stderr = appendTail(record.stderr, chunk, MAX_RUN_OUTPUT);
+  });
+  child.on("error", (err) => {
+    record.running = false;
+    record.finishedAt = new Date().toISOString();
+    record.stderr = appendTail(record.stderr, Buffer.from(err.message), MAX_RUN_OUTPUT);
+  });
+  child.on("close", (code, signal) => {
+    record.running = false;
+    record.finishedAt = new Date().toISOString();
+    record.exitCode = code;
+    record.signal = signal;
+  });
+
+  return record;
+}
+
 const routes: FastifyPluginAsync = async (app) => {
   app.get("/api/longwrite", async (req, reply) => {
     const workspaceDir = requireDir((req.query as { dir?: string }).dir);
@@ -211,6 +276,7 @@ const routes: FastifyPluginAsync = async (app) => {
       flow,
       usage,
       logs,
+      operation: runStatus(workspaceDir),
       commands: {
         status: `longwrite status ${shellQuote(workspaceDir)}`,
         run: runCommand(workspaceDir, runtime),
@@ -239,6 +305,24 @@ const routes: FastifyPluginAsync = async (app) => {
       return { ok: true, ...result, artifact: "reports/human-review-packet.md" };
     } catch (err) {
       return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/longwrite/run", async (req, reply) => {
+    const { dir, runtime, reset } = (req.body ?? {}) as { dir?: string; runtime?: string; reset?: boolean };
+    const workspaceDir = requireDir(dir);
+    if (runtime !== undefined && (typeof runtime !== "string" || runtime.trim().length === 0)) {
+      return reply.status(400).send({ error: "runtime must be a non-empty string" });
+    }
+    try {
+      const record = spawnLongWriteRun(workspaceDir, { runtime: runtime?.trim(), reset: reset === true });
+      return { ok: true, operation: record };
+    } catch (err) {
+      const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+        ? Number((err as { statusCode?: number }).statusCode)
+        : 500;
+      return reply.status(Number.isFinite(statusCode) ? statusCode : 500)
+        .send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 };
