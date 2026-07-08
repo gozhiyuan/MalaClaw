@@ -14,10 +14,43 @@ const TAIL_BYTES = 20_000;
 type StageView = {
   id: string;
   title?: string;
-  type: "standard" | "foreach";
+  type: "standard" | "foreach" | "loop";
   owner?: string;
   outputs: Array<{ path: string; exists: boolean }>;
 };
+
+type LoopView = {
+  id: string;
+  title?: string;
+  maxRounds: number;
+  stopWhen?: string;
+  rounds: number;
+  status?: string;
+  /** Current value of the stop_when metric from reports/metrics.json. */
+  current?: number;
+};
+
+function stageOutputs(stage: Record<string, unknown>): string[] {
+  if (Array.isArray(stage.stages)) {
+    return (stage.stages as Array<Record<string, unknown>>).flatMap(stageOutputs);
+  }
+  if (Array.isArray(stage.steps)) {
+    return (stage.steps as Array<{ outputs?: string[] }>).flatMap((s) => s.outputs ?? []);
+  }
+  return (stage.outputs as string[] | undefined) ?? [];
+}
+
+async function readStopMetric(workspaceDir: string, stopWhen?: string): Promise<number | undefined> {
+  const metric = stopWhen?.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+  if (!metric) return undefined;
+  try {
+    const raw = await fs.readFile(path.join(workspaceDir, "reports", "metrics.json"), "utf-8");
+    const value = (JSON.parse(raw) as Record<string, unknown>)[metric];
+    return typeof value === "number" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 async function listDir(dir: string): Promise<string[]> {
   try {
@@ -38,10 +71,7 @@ async function stageViews(workspaceDir: string): Promise<StageView[]> {
   if (!workflow) return [];
   const views: StageView[] = [];
   for (const stage of workflow.stages) {
-    const outputs: string[] =
-      "steps" in stage && Array.isArray(stage.steps)
-        ? stage.steps.flatMap((s: { outputs?: string[] }) => s.outputs ?? [])
-        : ((stage as { outputs?: string[] }).outputs ?? []);
+    const outputs = stageOutputs(stage as Record<string, unknown>);
     const checked = await Promise.all(
       outputs.map(async (out) => {
         // Globs and {{item}} templates can't be existence-checked directly.
@@ -57,12 +87,56 @@ async function stageViews(workspaceDir: string): Promise<StageView[]> {
     views.push({
       id: stage.id,
       title: (stage as { title?: string }).title,
-      type: "steps" in stage && stage.steps ? "foreach" : "standard",
+      type: "stages" in stage ? "loop" : "steps" in stage && stage.steps ? "foreach" : "standard",
       owner: (stage as { owner?: string }).owner,
       outputs: checked,
     });
   }
   return views;
+}
+
+async function loopViews(
+  workspaceDir: string,
+  units: Record<string, { rounds?: number; status?: string }>,
+): Promise<LoopView[]> {
+  let manifest;
+  try {
+    manifest = await loadManifest(workspaceDir);
+  } catch {
+    return [];
+  }
+  const views: LoopView[] = [];
+  for (const stage of manifest.workflow?.stages ?? []) {
+    if (!("stages" in stage)) continue;
+    views.push({
+      id: stage.id,
+      title: stage.title,
+      maxRounds: stage.max_rounds,
+      stopWhen: stage.stop_when,
+      rounds: units[stage.id]?.rounds ?? 0,
+      status: units[stage.id]?.status,
+      current: await readStopMetric(workspaceDir, stage.stop_when),
+    });
+  }
+  return views;
+}
+
+type UsageEvent = {
+  type: string;
+  key?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; cost_usd?: number };
+};
+
+function usageByUnit(events: UsageEvent[]): Record<string, { totalTokens: number; costUsd: number }> {
+  const byUnit: Record<string, { totalTokens: number; costUsd: number }> = {};
+  for (const event of events) {
+    if (event.type !== "unit_succeeded" || !event.usage || !event.key) continue;
+    const entry = (byUnit[event.key] ??= { totalTokens: 0, costUsd: 0 });
+    entry.totalTokens +=
+      event.usage.total_tokens ?? (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0);
+    entry.costUsd += event.usage.cost_usd ?? 0;
+  }
+  return byUnit;
 }
 
 async function blockerReports(workspaceDir: string): Promise<Array<{ file: string; excerpt: string }>> {
@@ -103,7 +177,9 @@ const routes: FastifyPluginAsync = async (app) => {
       dir,
       state,
       stages,
+      loops: await loopViews(dir, state?.units ?? {}),
       usage,
+      usageByUnit: usageByUnit(events as UsageEvent[]),
       blockers,
       files: { logs, prompts },
       events: events.slice(-50),

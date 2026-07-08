@@ -26,11 +26,21 @@ type FlowResponse = {
   stages: Array<{
     id: string;
     title?: string;
-    type: "standard" | "foreach";
+    type: "standard" | "foreach" | "loop";
     owner?: string;
     outputs: Array<{ path: string; exists: boolean }>;
   }>;
+  loops: Array<{
+    id: string;
+    title?: string;
+    maxRounds: number;
+    stopWhen?: string;
+    rounds: number;
+    status?: string;
+    current?: number;
+  }>;
   usage: { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; unitsWithUsage: number };
+  usageByUnit: Record<string, { totalTokens: number; costUsd: number }>;
   blockers: Array<{ file: string; excerpt: string }>;
   files: { logs: string[]; prompts: string[] };
   events: Array<{ ts?: string; type: string; key?: string; [k: string]: unknown }>;
@@ -80,6 +90,54 @@ function FileViewer({ dir, kind, name, onClose }: { dir: string; kind: string; n
       }}>{error ? String(error) : data?.content ?? "Loading…"}</pre>
     </div>
   );
+}
+
+type UnitRow =
+  | { kind: "header"; id: string; label: string; tokens: number; cost: number }
+  | { kind: "unit"; id: string; unit: UnitState; indent: boolean };
+
+/** Order units for display: non-loop units first (state order), then each
+ *  loop's rounds as grouped sections with per-round token/cost sums. */
+function groupUnitRows(
+  units: Record<string, UnitState>,
+  loops: FlowResponse["loops"],
+  usageByUnit: FlowResponse["usageByUnit"],
+): UnitRow[] {
+  const loopRoundKey = (key: string): { loopId: string; round: number } | null => {
+    for (const loop of loops) {
+      const match = key.match(new RegExp(`^${loop.id}-r(\\d+)-`));
+      if (match) return { loopId: loop.id, round: Number(match[1]) };
+    }
+    return null;
+  };
+
+  const rows: UnitRow[] = [];
+  const grouped = new Map<string, string[]>();
+  for (const key of Object.keys(units)) {
+    const inLoop = loopRoundKey(key);
+    if (!inLoop) {
+      rows.push({ kind: "unit", id: key, unit: units[key], indent: false });
+      continue;
+    }
+    const groupId = `${inLoop.loopId}-r${inLoop.round}`;
+    if (!grouped.has(groupId)) grouped.set(groupId, []);
+    grouped.get(groupId)!.push(key);
+  }
+
+  const sortedGroups = [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+  for (const [groupId, keys] of sortedGroups) {
+    let tokens = 0;
+    let cost = 0;
+    for (const key of keys) {
+      tokens += usageByUnit[key]?.totalTokens ?? 0;
+      cost += usageByUnit[key]?.costUsd ?? 0;
+    }
+    const round = groupId.match(/-r(\d+)$/)?.[1];
+    const loopId = groupId.replace(/-r\d+$/, "");
+    rows.push({ kind: "header", id: groupId, label: `${loopId} · round ${round}`, tokens, cost });
+    for (const key of keys) rows.push({ kind: "unit", id: key, unit: units[key], indent: true });
+  }
+  return rows;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -192,6 +250,26 @@ export function Flow() {
             </Section>
           )}
 
+          {data!.loops.length > 0 && (
+            <Section title="Loops">
+              {data!.loops.map((loop) => (
+                <div key={loop.id} style={{ display: "flex", gap: 14, alignItems: "baseline", padding: "3px 0", fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ color: "#c9d1d9", fontFamily: "monospace" }}>{loop.id}</span>
+                  <span style={{ color: colors[loop.status ?? ""] ?? "#8b949e" }}>{loop.status ?? "pending"}</span>
+                  <span style={{ color: "#8b949e" }}>round {loop.rounds} / {loop.maxRounds}</span>
+                  {loop.stopWhen && (
+                    <span style={{ color: "#8b949e" }}>
+                      stop when <span style={{ fontFamily: "monospace", color: "#c9d1d9" }}>{loop.stopWhen}</span>
+                      {loop.current !== undefined && (
+                        <> — current <span style={{ color: "#d29922", fontWeight: 600 }}>{loop.current}</span></>
+                      )}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </Section>
+          )}
+
           <Section title="Units">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -202,23 +280,40 @@ export function Flow() {
                   <th style={{ padding: "4px 8px" }}>attempts</th>
                   <th style={{ padding: "4px 8px" }}>rounds</th>
                   <th style={{ padding: "4px 8px" }}>runtime</th>
+                  <th style={{ padding: "4px 8px" }}>tokens</th>
                   <th style={{ padding: "4px 8px" }}>last error</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(state.units).map(([key, unit]) => (
-                  <tr key={key} style={{ borderTop: "1px solid #21262d" }}>
-                    <td style={{ padding: "4px 8px", color: colors[unit.status] }}>{marks[unit.status]}</td>
-                    <td style={{ padding: "4px 8px", color: "#c9d1d9", fontFamily: "monospace" }}>{key}</td>
-                    <td style={{ padding: "4px 8px", color: colors[unit.status] }}>{unit.status}</td>
-                    <td style={{ padding: "4px 8px", color: "#8b949e" }}>{unit.attempts}</td>
-                    <td style={{ padding: "4px 8px", color: "#8b949e" }}>{unit.rounds ?? 0}</td>
-                    <td style={{ padding: "4px 8px", color: "#8b949e" }}>{unit.actualRuntime ?? ""}</td>
-                    <td style={{ padding: "4px 8px", color: "#f85149", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {unit.lastError ?? ""}
-                    </td>
-                  </tr>
-                ))}
+                {groupUnitRows(state.units, data!.loops, data!.usageByUnit).map((row) =>
+                  row.kind === "header" ? (
+                    <tr key={row.id} style={{ borderTop: "1px solid #30363d", background: "#161b22" }}>
+                      <td colSpan={8} style={{ padding: "4px 8px", color: "#58a6ff", fontSize: 12 }}>
+                        {row.label}
+                        {row.tokens > 0 && (
+                          <span style={{ color: "#8b949e" }}>
+                            {" "}— {row.tokens.toLocaleString()} tokens{row.cost > 0 ? ` · $${row.cost.toFixed(4)}` : ""}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={row.id} style={{ borderTop: "1px solid #21262d" }}>
+                      <td style={{ padding: "4px 8px", color: colors[row.unit.status] }}>{marks[row.unit.status]}</td>
+                      <td style={{ padding: `4px 8px 4px ${row.indent ? 24 : 8}px`, color: "#c9d1d9", fontFamily: "monospace" }}>{row.id}</td>
+                      <td style={{ padding: "4px 8px", color: colors[row.unit.status] }}>{row.unit.status}</td>
+                      <td style={{ padding: "4px 8px", color: "#8b949e" }}>{row.unit.attempts}</td>
+                      <td style={{ padding: "4px 8px", color: "#8b949e" }}>{row.unit.rounds ?? 0}</td>
+                      <td style={{ padding: "4px 8px", color: "#8b949e" }}>{row.unit.actualRuntime ?? ""}</td>
+                      <td style={{ padding: "4px 8px", color: "#8b949e" }}>
+                        {data!.usageByUnit[row.id]?.totalTokens ? data!.usageByUnit[row.id].totalTokens.toLocaleString() : ""}
+                      </td>
+                      <td style={{ padding: "4px 8px", color: "#f85149", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {row.unit.lastError ?? ""}
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </Section>
