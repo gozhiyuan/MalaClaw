@@ -62,6 +62,38 @@ describe("budget approval gate", () => {
     expect(state.pendingApprovals).toHaveLength(0);
   });
 
+  it("does not let budget approval skip a later human approval on the same stage", async () => {
+    const ws = await makeWorkspace();
+    const workflow = WorkflowDef.parse({
+      model_tiers: {
+        strong: { runtime: "dry-run", model: "big", requires_budget_approval: true },
+      },
+      stages: [
+        {
+          id: "draft",
+          owner: "writer",
+          outputs: ["draft.md"],
+          model_tier: "strong",
+          requires_human_approval: true,
+        },
+      ],
+    });
+
+    const gated = await runFlow({ workflow, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(gated.status).toBe("paused_for_approval");
+    expect(gated.pendingApprovals[0].id).toBe("approve-budget-draft-001");
+
+    await approveFlow(ws, "approve-budget-draft-001");
+    const afterSpend = await runFlow({ workflow, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(afterSpend.status).toBe("paused_for_approval");
+    expect(afterSpend.units.draft.status).toBe("succeeded");
+    expect(afterSpend.pendingApprovals[0].id).toBe("approve-draft-001");
+
+    await approveFlow(ws, "approve-draft-001");
+    const finished = await runFlow({ workflow, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(finished.status).toBe("completed");
+  });
+
   it("gates foreach stages when any step uses a budget tier", async () => {
     const ws = await makeWorkspace();
     const workflow = WorkflowDef.parse({

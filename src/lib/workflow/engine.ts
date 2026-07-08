@@ -95,9 +95,10 @@ function queueBudgetApproval(state: FlowState, stageId: string): void {
   if (state.pendingApprovals.some((a) => a.stageId === stageId && a.id.startsWith("approve-budget-"))) {
     return;
   }
-  state.units[stageId].approvalGranted = false;
+  state.units[stageId].budgetApproved = false;
   state.pendingApprovals.push({
     id: `approve-budget-${stageId}-${String(state.pendingApprovals.length + 1).padStart(3, "0")}`,
+    kind: "budget",
     stageId,
     artifacts: [],
   });
@@ -159,7 +160,7 @@ async function runUnit(
 ): Promise<"succeeded" | "failed" | "paused"> {
   const { workspaceDir, workflow, runtime } = opts;
   const unitKey = spec.key;
-  state.units[unitKey] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
+  state.units[unitKey] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
   const unit = state.units[unitKey];
   const maxAttempts = spec.retry?.max_attempts ?? 2;
   const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
@@ -267,7 +268,7 @@ async function runStandardStage(
   state: FlowState,
 ): Promise<"succeeded" | "failed" | "paused"> {
   const spec = stageToSpec(stage);
-  state.units[spec.key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
+  state.units[spec.key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
   const unit = state.units[spec.key];
   const maxRounds = stage.max_rounds ?? 1;
   let lastCurrent: number | undefined;
@@ -373,6 +374,7 @@ function queueApproval(state: FlowState, spec: WorkUnitSpec): void {
   state.units[spec.key].approvalGranted = false;
   state.pendingApprovals.push({
     id: approvalId(spec, state.pendingApprovals.length),
+    kind: "human",
     stageId: spec.stageId,
     stepId: spec.stepId,
     itemId: spec.itemId,
@@ -403,7 +405,7 @@ async function ensureForeachExpansion(
     for (const itemId of state.foreachItems[stage.id]) {
       for (const step of stage.steps) {
         const key = `${stage.id}.${step.id}[${itemId}]`;
-        state.units[key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false };
+        state.units[key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
       }
     }
     await appendEvent(opts.workspaceDir, {
@@ -542,7 +544,7 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
 
     // Budget gate: stages on a requires_budget_approval tier need explicit
     // pre-approval before any spend. Granted approval survives resume.
-    if (needsBudgetApproval(stage, workflow) && !unit.approvalGranted) {
+    if (needsBudgetApproval(stage, workflow) && !unit.budgetApproved) {
       queueBudgetApproval(state, stage.id);
       state.status = "paused_for_approval";
       await appendEvent(workspaceDir, { type: "flow_paused_budget_approval", key: stage.id });
@@ -601,7 +603,10 @@ export async function approveFlow(workspaceDir: string, approvalId: string): Pro
   }
   const [approval] = state.pendingApprovals.splice(index, 1);
   const unit = state.units[approvalUnitKey(approval)];
-  if (unit) unit.approvalGranted = true;
+  if (unit) {
+    if (approval.kind === "budget") unit.budgetApproved = true;
+    else unit.approvalGranted = true;
+  }
   if (state.pendingApprovals.length === 0 && state.status === "paused_for_approval") {
     state.status = "idle";
   }
@@ -617,7 +622,10 @@ export async function approveAllFlow(workspaceDir: string): Promise<FlowState> {
   state.pendingApprovals = [];
   for (const approval of approvals) {
     const unit = state.units[approvalUnitKey(approval)];
-    if (unit) unit.approvalGranted = true;
+    if (unit) {
+      if (approval.kind === "budget") unit.budgetApproved = true;
+      else unit.approvalGranted = true;
+    }
   }
   if (state.status === "paused_for_approval") {
     state.status = "idle";

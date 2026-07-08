@@ -128,5 +128,8 @@ malaclaw dashboard
 ```
 
 The dashboard reads project manifests, lockfiles, telemetry, and starter
-metadata. It is useful for inspecting provisioned projects. Workflow-specific UI
-is still post-MVP.
+metadata. It is useful for inspecting provisioned projects and active flow
+runs. The LongWrite tab reads a writing workspace, summarizes `longwrite.yaml`,
+the compiled `malaclaw.yaml`, runtime/model policy, review cadence, flow status,
+token/cost telemetry, and command hints, then links into the Flow monitor for
+logs and approvals.

@@ -14,11 +14,13 @@ export const UnitState = z.object({
   requestedRuntime: z.string().optional(),
   actualRuntime: z.string().optional(),
   approvalGranted: z.boolean().default(false),
+  budgetApproved: z.boolean().default(false),
 });
 export type UnitState = z.infer<typeof UnitState>;
 
 export const PendingApproval = z.object({
   id: z.string(),
+  kind: z.enum(["human", "budget"]).default("human"),
   stageId: z.string(),
   stepId: z.string().optional(),
   itemId: z.string().optional(),

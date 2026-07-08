@@ -15,6 +15,7 @@ import starterRoutes from "./routes/starters.js";
 import manifestRoutes from "./routes/manifest.js";
 import diffRoutes from "./routes/diff.js";
 import flowRoutes from "./routes/flow.js";
+import longwriteRoutes from "./routes/longwrite.js";
 import { RuntimeStatusProvider } from "./services/runtime-status.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { MemoryWriter } from "./services/memory-writer.js";
@@ -22,6 +23,16 @@ import { createMemoryRoutes } from "./routes/memory.js";
 import { createAuthHook } from "./middleware/auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+type HttpError = Error & {
+  statusCode?: number;
+  code?: string;
+  validation?: unknown;
+};
+
+function asHttpError(error: unknown): HttpError {
+  return error instanceof Error ? (error as HttpError) : (new Error(String(error)) as HttpError);
+}
 
 export async function createServer(opts: { host?: string; port?: number; authToken?: string } = {}) {
   const host = opts.host ?? "0.0.0.0";
@@ -59,11 +70,12 @@ export async function createServer(opts: { host?: string; port?: number; authTok
 
   // Error handler — returns JSON matching spec error response format
   app.setErrorHandler((error, _request, reply) => {
-    const status = error.statusCode ?? 500;
+    const err = asHttpError(error);
+    const status = err.statusCode ?? 500;
     reply.status(status).send({
-      error: error.message,
-      code: error.code ?? "INTERNAL_ERROR",
-      details: error.validation ?? {},
+      error: err.message,
+      code: err.code ?? "INTERNAL_ERROR",
+      details: err.validation ?? {},
     });
   });
 
@@ -96,6 +108,7 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   await app.register(manifestRoutes);
   await app.register(diffRoutes);
   await app.register(flowRoutes);
+  await app.register(longwriteRoutes);
   await app.register(createUsageRoutes(statusProvider));
 
   const memoryWriter = new MemoryWriter();

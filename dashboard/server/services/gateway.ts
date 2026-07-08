@@ -33,7 +33,7 @@ export class GatewayClient {
   private tryConnect() {
     try {
       this.ws = new WebSocket(this.config.url);
-      this.ws.on("message", (raw) => {
+      this.ws.on("message", (raw: WebSocket.RawData) => {
         try {
           const msg = JSON.parse(raw.toString());
           this.handleMessage(msg);
