@@ -22,6 +22,14 @@ beforeAll(async () => {
       "const fs = require('node:fs');",
       "const path = require('node:path');",
       "const cmd = process.argv[2];",
+      "if (cmd === 'validate') {",
+      "  const workspace = process.argv[4];",
+      "  const raw = fs.readFileSync(path.join(workspace, 'longwrite.yaml'), 'utf8');",
+      "  if (raw.includes('batchApprovals')) { console.error('review: Unrecognized key'); process.exit(1); }",
+      "  if (!raw.includes('version: 1')) { console.error('version: Invalid literal value, expected 1'); process.exit(1); }",
+      "  console.log('config valid');",
+      "  process.exit(0);",
+      "}",
       "const workspace = cmd === 'report' ? process.argv[4] : process.argv[3];",
       "if (cmd === 'report') {",
       "  fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
@@ -164,6 +172,33 @@ describe("longwrite routes", () => {
     expect(status.json().operation.exitCode).toBe(0);
     expect(status.json().operation.stdout).toContain("run finished");
     expect(await fs.readFile(path.join(ws, "reports", "stub-run.txt"), "utf-8")).toContain("done");
+  });
+
+  it("POST /api/longwrite/config validates before writing longwrite.yaml", async () => {
+    const config = {
+      version: 1,
+      project: { id: "survey", name: "Updated Survey", artifact_type: "research_paper", mode: "auto_research_v2_lite" },
+      research: { provider: "seed", topic: "Updated topic" },
+      review: { cadence: "interval", time: "08:00", interval_hours: 6, batch_approvals: false },
+    };
+
+    const saved = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/config",
+      payload: { dir: ws, config },
+    });
+    expect(saved.statusCode).toBe(200);
+    const raw = await fs.readFile(path.join(ws, "longwrite.yaml"), "utf-8");
+    expect(raw).toContain("Updated Survey");
+    expect(raw).toContain("interval_hours: 6");
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/config",
+      payload: { dir: ws, config: { ...config, review: { ...config.review, batchApprovals: true } } },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toContain("Unrecognized key");
   });
 
   it("shell-quotes command hints without allowing shell expansion", async () => {

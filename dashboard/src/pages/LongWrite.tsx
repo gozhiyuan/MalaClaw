@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 type LongWriteResponse = {
   dir: string;
+  config: ProjectConfig;
   project: { id?: string; name?: string; mode?: string; artifactType?: string };
   research: { topic?: string; provider?: string };
   review: { cadence: string; time?: string; intervalHours?: number; batchApprovals: boolean };
@@ -46,6 +47,26 @@ type LongWriteResponse = {
     stderr: string;
   } | null;
   commands: { status: string; run: string; approve: string; packet: string };
+};
+
+type ProjectConfig = {
+  version: 1;
+  project: {
+    id: string;
+    name?: string;
+    artifact_type: string;
+    mode: string;
+  };
+  research?: {
+    provider?: string;
+    topic?: string;
+  };
+  review?: {
+    cadence?: "manual" | "daily" | "interval";
+    time?: string;
+    interval_hours?: number;
+    batch_approvals?: boolean;
+  };
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -116,8 +137,13 @@ export function LongWrite() {
   const [input, setInput] = useState(dir);
   const [operationMessage, setOperationMessage] = useState<string | null>(null);
   const [runtimeOverride, setRuntimeOverride] = useState("");
+  const [draftConfig, setDraftConfig] = useState<ProjectConfig | null>(null);
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useLongWrite(dir);
+
+  useEffect(() => {
+    if (data?.config) setDraftConfig(data.config);
+  }, [data?.dir, data?.config]);
 
   const approve = useMutation({
     mutationFn: (body: { approvalId?: string; batch?: boolean }) =>
@@ -148,6 +174,16 @@ export function LongWrite() {
     onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
   });
 
+  const saveConfig = useMutation({
+    mutationFn: (config: ProjectConfig) =>
+      postJson<{ ok: boolean; path: string }>("/api/longwrite/config", { dir, config }),
+    onSuccess: () => {
+      setOperationMessage("Saved longwrite.yaml.");
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
   const load = () => {
     localStorage.setItem("longwrite-dir", input);
     localStorage.setItem("malaclaw-flow-dir", input);
@@ -162,6 +198,10 @@ export function LongWrite() {
   const succeeded = flowUnits.filter((unit) => unit.status === "succeeded").length;
   const selectedRuntime = runtimeOverride.trim() || data?.workflow.runtime || undefined;
   const runActive = data?.operation?.running === true;
+
+  const patchConfig = (patch: (current: ProjectConfig) => ProjectConfig) => {
+    setDraftConfig((current) => current ? patch(current) : current);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 1120 }}>
@@ -350,6 +390,139 @@ export function LongWrite() {
               </div>
             )}
           </Section>
+
+          {draftConfig && (
+            <Section title="Config">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Project name
+                  <input
+                    value={draftConfig.project.name ?? ""}
+                    onChange={(e) => patchConfig((c) => ({ ...c, project: { ...c.project, name: e.target.value } }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Topic
+                  <input
+                    value={draftConfig.research?.topic ?? ""}
+                    onChange={(e) => patchConfig((c) => ({ ...c, research: { provider: c.research?.provider ?? "seed", ...c.research, topic: e.target.value } }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Provider
+                  <select
+                    value={draftConfig.research?.provider ?? "seed"}
+                    onChange={(e) => patchConfig((c) => ({ ...c, research: { ...c.research, provider: e.target.value } }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  >
+                    <option value="seed">seed</option>
+                    <option value="arxiv">arxiv</option>
+                    <option value="semantic_scholar">semantic_scholar</option>
+                  </select>
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Review cadence
+                  <select
+                    value={draftConfig.review?.cadence ?? "manual"}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      review: { time: "08:00", interval_hours: 4, batch_approvals: false, ...c.review, cadence: e.target.value as "manual" | "daily" | "interval" },
+                    }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  >
+                    <option value="manual">manual</option>
+                    <option value="daily">daily</option>
+                    <option value="interval">interval</option>
+                  </select>
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Review time
+                  <input
+                    value={draftConfig.review?.time ?? "08:00"}
+                    onChange={(e) => patchConfig((c) => ({ ...c, review: { cadence: "manual", interval_hours: 4, batch_approvals: false, ...c.review, time: e.target.value } }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Interval hours
+                  <input
+                    type="number"
+                    min={1}
+                    value={draftConfig.review?.interval_hours ?? 4}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      review: { cadence: "manual", time: "08:00", batch_approvals: false, ...c.review, interval_hours: Number(e.target.value) },
+                    }))}
+                    style={{
+                      display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
+                      padding: "6px 8px", borderRadius: 6, border: "1px solid #30363d",
+                      background: "#0d1117", color: "#c9d1d9",
+                    }}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12, display: "flex", gap: 8, alignItems: "center", marginTop: 20 }}>
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.review?.batch_approvals ?? false}
+                    onChange={(e) => patchConfig((c) => ({ ...c, review: { cadence: "manual", time: "08:00", interval_hours: 4, ...c.review, batch_approvals: e.target.checked } }))}
+                  />
+                  Batch approvals
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  onClick={() => saveConfig.mutate(draftConfig)}
+                  disabled={saveConfig.isPending}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #30363d",
+                    background: "#238636",
+                    color: "#fff",
+                    cursor: saveConfig.isPending ? "wait" : "pointer",
+                  }}
+                >
+                  Save config
+                </button>
+                <button
+                  onClick={() => data?.config && setDraftConfig(data.config)}
+                  disabled={saveConfig.isPending}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #30363d",
+                    background: "#21262d",
+                    color: "#c9d1d9",
+                    cursor: "pointer",
+                  }}
+                >
+                  Revert
+                </button>
+              </div>
+            </Section>
+          )}
 
           <Section title="Commands">
             <div style={{ display: "grid", gap: 8 }}>

@@ -133,6 +133,8 @@ runs. The LongWrite tab reads a writing workspace, summarizes `longwrite.yaml`,
 the compiled `malaclaw.yaml`, runtime/model policy, review cadence, flow status,
 token/cost telemetry, command hints, recent worker logs, and dashboard-launched
 run output. It can start one LongWrite run per workspace, reject duplicate
-runs, approve pending LongWrite gates, and generate
+runs, edit the stable `longwrite.yaml` project/research/review fields through
+LongWrite's config validator, approve pending LongWrite gates, and generate
 `reports/human-review-packet.md`, then links into the Flow monitor for deeper
-logs and events.
+logs and events. Workflow structure and mode recompilation still stay in the
+LongWrite CLI/YAML path.

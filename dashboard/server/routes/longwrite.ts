@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { loadFlowState, logsDir } from "../../../dist/lib/workflow/state.js";
 import { approveAllFlow, approveFlow } from "../../../dist/lib/workflow/engine.js";
 import { summarizeUsage } from "../../../dist/commands/flow.js";
@@ -21,6 +22,13 @@ type StageSummary = {
   maxParallel?: number;
   steps: Array<{ id: string; owner?: string; runtime?: string; model?: string; modelTier?: string }>;
   outputs: string[];
+};
+
+type ProjectConfig = YamlRecord & {
+  version?: unknown;
+  project?: YamlRecord;
+  research?: YamlRecord;
+  review?: YamlRecord;
 };
 
 const LOG_TAIL_BYTES = 10_000;
@@ -151,6 +159,16 @@ function longwriteBin(): string {
   return process.env.MALACLAW_LONGWRITE_BIN ?? process.env.LONGWRITE_BIN ?? "longwrite";
 }
 
+async function validateProjectConfig(config: unknown): Promise<void> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-longwrite-config-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "longwrite.yaml"), stringifyYaml(config), "utf-8");
+    await runLongWrite(["validate", "config", tempDir], tempDir);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 function runLongWrite(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(longwriteBin(), args, { cwd, shell: false });
@@ -250,6 +268,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
     return {
       dir: workspaceDir,
+      config: longwrite,
       project: {
         id: asString(project.id),
         name: asString(project.name),
@@ -323,6 +342,22 @@ const routes: FastifyPluginAsync = async (app) => {
         : 500;
       return reply.status(Number.isFinite(statusCode) ? statusCode : 500)
         .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/longwrite/config", async (req, reply) => {
+    const { dir, config } = (req.body ?? {}) as { dir?: string; config?: ProjectConfig };
+    const workspaceDir = requireDir(dir);
+    if (typeof config !== "object" || config === null || Array.isArray(config)) {
+      return reply.status(400).send({ error: "config must be an object" });
+    }
+    try {
+      await validateProjectConfig(config);
+      const target = path.join(workspaceDir, "longwrite.yaml");
+      await fs.writeFile(target, stringifyYaml(config), "utf-8");
+      return { ok: true, path: "longwrite.yaml" };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 };
