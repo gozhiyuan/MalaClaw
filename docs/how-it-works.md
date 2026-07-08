@@ -15,6 +15,7 @@ malaclaw.yaml
   ├─ optional packs/skills for provisioning
   └─ workflow
        ├─ stages / foreach steps
+       ├─ loop groups
        ├─ inputs / outputs
        ├─ validators / validator_commands
        ├─ approvals / retries

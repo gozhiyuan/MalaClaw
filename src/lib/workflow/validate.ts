@@ -35,10 +35,33 @@ type WorkUnit = {
 /** Flatten a stage into ordered work units. Foreach steps keep their declared
  *  order, so within an item pipeline earlier steps' outputs count as produced
  *  for later steps' inputs. */
-function toWorkUnits(stage: WorkflowStage): WorkUnit[] {
+function validateStopConfig(
+  id: string,
+  maxRounds: number | undefined,
+  stopWhen: string | undefined,
+  errors: string[],
+): void {
+  if (!stopWhen) return;
+  if (!maxRounds) {
+    errors.push(
+      `Stage "${id}": stop_when requires max_rounds (an unbounded loop is not allowed)`,
+    );
+  }
+  if (!parseStopCondition(stopWhen)) {
+    errors.push(
+      `Stage "${id}": stop_when "${stopWhen}" is not a valid condition (<metric> <op> <number>)`,
+    );
+  }
+}
+
+function toWorkUnits(stage: WorkflowStage, prefix?: string): WorkUnit[] {
+  const labelPrefix = prefix ? `${prefix}.` : "";
+  if ("stages" in stage) {
+    return stage.stages.flatMap((child) => toWorkUnits(child, `${labelPrefix}${stage.id}`));
+  }
   if ("steps" in stage) {
     return stage.steps.map((step) => ({
-      label: `${stage.id}.${step.id}`,
+      label: `${labelPrefix}${stage.id}.${step.id}`,
       owner: step.owner,
       inputs: step.inputs,
       outputs: step.outputs,
@@ -46,7 +69,7 @@ function toWorkUnits(stage: WorkflowStage): WorkUnit[] {
     }));
   }
   return [{
-    label: stage.id,
+    label: `${labelPrefix}${stage.id}`,
     owner: stage.owner,
     inputs: stage.inputs,
     outputs: stage.outputs,
@@ -66,16 +89,14 @@ export function validateWorkflowSemantics(
   const producedOutputs: string[] = [...workflow.external_inputs];
 
   for (const stage of workflow.stages) {
-    if (!("steps" in stage) && stage.stop_when) {
-      if (!stage.max_rounds) {
-        errors.push(
-          `Stage "${stage.id}": stop_when requires max_rounds (an unbounded loop is not allowed)`,
-        );
-      }
-      if (!parseStopCondition(stage.stop_when)) {
-        errors.push(
-          `Stage "${stage.id}": stop_when "${stage.stop_when}" is not a valid condition (<metric> <op> <number>)`,
-        );
+    if (!("steps" in stage)) {
+      validateStopConfig(stage.id, stage.max_rounds, stage.stop_when, errors);
+      if ("stages" in stage) {
+        for (const child of stage.stages) {
+          if (!("steps" in child)) {
+            validateStopConfig(`${stage.id}.${child.id}`, child.max_rounds, child.stop_when, errors);
+          }
+        }
       }
     }
     for (const unit of toWorkUnits(stage)) {

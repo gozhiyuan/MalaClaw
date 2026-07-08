@@ -363,11 +363,35 @@ export const ForeachStage = z
     });
   });
 
+export const LoopStage = z
+  .object({
+    type: z.literal("loop"),
+    id: workflowId,
+    title: z.string().optional(),
+    max_rounds: z.number().int().min(1),
+    stop_when: z.string().optional(),
+    stages: z.array(z.union([ForeachStage, StandardStage])).min(1),
+  })
+  .strict()
+  .superRefine((stage, ctx) => {
+    const seen = new Set<string>();
+    stage.stages.forEach((child, i) => {
+      if (seen.has(child.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["stages", i, "id"],
+          message: `Duplicate loop child stage id "${child.id}"`,
+        });
+      }
+      seen.add(child.id);
+    });
+  });
+
 // Not a discriminatedUnion: normal stages may omit `type`, and Zod v3
 // discriminated unions require the discriminator on every member. ForeachStage
 // is listed first but order does not affect correctness — strictness makes the
 // two shapes mutually exclusive.
-export const WorkflowStage = z.union([ForeachStage, StandardStage]);
+export const WorkflowStage = z.union([LoopStage, ForeachStage, StandardStage]);
 
 export const WorkflowDef = z
   .object({
@@ -407,6 +431,7 @@ export type WorkflowCommand = z.infer<typeof WorkflowCommand>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;
+export type LoopStage = z.infer<typeof LoopStage>;
 export type WorkflowStage = z.infer<typeof WorkflowStage>;
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 

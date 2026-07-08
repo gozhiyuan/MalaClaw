@@ -88,6 +88,24 @@ describe("stop_when semantic validation", () => {
     });
     expect(validateWorkflowSemantics(wf, owners).errors).toEqual([]);
   });
+
+  it("validates loop-group child owners and stop conditions", () => {
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop",
+        id: "quality",
+        max_rounds: 2,
+        stop_when: "review_score >= 8",
+        stages: [
+          { id: "review", owner: "pm", outputs: ["reviews/scorecard.json"] },
+          { id: "revise", owner: "missing-agent", inputs: ["reviews/scorecard.json"], outputs: ["chapters/*.md"] },
+        ],
+      }],
+    });
+    const result = validateWorkflowSemantics(wf, owners);
+    expect(result.errors.join("\n")).toContain("quality.revise");
+    expect(result.errors.join("\n")).toContain("missing-agent");
+  });
 });
 
 /** Test runtime: succeeds like dry-run but bumps review_score by `step` per call. */
@@ -220,5 +238,103 @@ describe("engine rounds loop", () => {
     const resumed = await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(2, 1) });
     expect(resumed.status).toBe("completed");
     expect(resumed.units.revise.rounds).toBe(3); // 1 before pause + 2 after
+  });
+});
+
+function loopScoringRuntime(scores: Record<number, number>) {
+  const inner = new DryRunRuntime();
+  return {
+    id: "dry-run",
+    checkAvailable: () => inner.checkAvailable(),
+    async runStage(req: StageRunRequest) {
+      const result = await inner.runStage(req);
+      const match = req.unitKey.match(/^quality-r(\d+)-build$/);
+      if (match) {
+        const round = Number(match[1]);
+        const metricsPath = path.join(req.workspaceDir, "reports", "metrics.json");
+        await fs.mkdir(path.dirname(metricsPath), { recursive: true });
+        await fs.writeFile(metricsPath, JSON.stringify({ review_score: scores[round] ?? 0 }), "utf-8");
+      }
+      return result;
+    },
+  };
+}
+
+describe("engine loop groups", () => {
+  it("runs a multi-stage loop until the group stop condition is met", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop",
+        id: "quality",
+        max_rounds: 4,
+        stop_when: "review_score >= 8.0",
+        stages: [
+          { id: "review", owner: "pm", outputs: ["reviews/scorecard.json"] },
+          { id: "route", owner: "pm", inputs: ["reviews/scorecard.json"], outputs: ["reports/routing.md"] },
+          { id: "revise", owner: "pm", inputs: ["reports/routing.md"], outputs: ["chapters/*.md"] },
+          { id: "build", owner: "pm", inputs: ["chapters/*.md"], outputs: ["build/manuscript.pdf"] },
+        ],
+      }],
+    });
+
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: loopScoringRuntime({ 1: 6.5, 2: 8.25 }) });
+    expect(state.status).toBe("completed");
+    expect(state.units.quality.rounds).toBe(2);
+    expect(state.units["quality-r1-review"].status).toBe("succeeded");
+    expect(state.units["quality-r2-build"].status).toBe("succeeded");
+    expect(state.units["quality-r3-review"]).toBeUndefined();
+    const events = await readEvents(ws);
+    expect(events.filter((e) => e.type === "loop_round_completed" && e.key === "quality")).toHaveLength(2);
+    expect(events.some((e) => e.type === "stop_condition_met" && e.key === "quality")).toBe(true);
+  });
+
+  it("resumes a loop group after a child approval gate", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop",
+        id: "quality",
+        max_rounds: 1,
+        stages: [
+          { id: "review", owner: "pm", outputs: ["reviews/scorecard.json"], requires_human_approval: true },
+          { id: "revise", owner: "pm", inputs: ["reviews/scorecard.json"], outputs: ["chapters/*.md"] },
+        ],
+      }],
+    });
+    const paused = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(paused.status).toBe("paused_for_approval");
+    expect(paused.pendingApprovals[0].stageId).toBe("quality-r1-review");
+    expect(paused.units["quality-r1-revise"].status).toBe("pending");
+
+    const { approveAllFlow } = await import("../src/lib/workflow/engine.js");
+    await approveAllFlow(ws);
+    const resumed = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(resumed.status).toBe("completed");
+    expect(resumed.units.quality.rounds).toBe(1);
+    expect(resumed.units["quality-r1-revise"].status).toBe("succeeded");
+  });
+
+  it("pauses for budget approval on a loop child model tier", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      model_tiers: {
+        strong: { runtime: "dry-run", model: "expensive-model", requires_budget_approval: true },
+      },
+      stages: [{
+        type: "loop",
+        id: "quality",
+        max_rounds: 1,
+        stages: [
+          { id: "review", owner: "pm", model_tier: "strong", outputs: ["reviews/scorecard.json"] },
+        ],
+      }],
+    });
+    const paused = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(paused.status).toBe("paused_for_approval");
+    expect(paused.pendingApprovals[0]).toMatchObject({
+      kind: "budget",
+      stageId: "quality-r1-review",
+    });
   });
 });

@@ -4,9 +4,9 @@ MalaClaw is a workflow and runtime control plane for long-running multi-agent
 projects.
 
 It turns a project-local `malaclaw.yaml` into a resumable flow with file-backed
-state, approval gates, validators, bounded retries, foreach fanout, and
-pluggable workers such as Claude Code, Codex, deterministic scripts, and
-OpenAI-compatible chat servers.
+state, approval gates, validators, bounded retries, foreach fanout, loop
+groups, and pluggable workers such as Claude Code, Codex, deterministic
+scripts, and OpenAI-compatible chat servers.
 
 The first flagship consumer is LongWrite Agent: an AutoResearch-style long-form
 writing workflow that uses MalaClaw for orchestration and worker runtime
@@ -18,7 +18,7 @@ MalaClaw has two related surfaces:
 
 | Surface | Purpose |
 | --- | --- |
-| Workflow engine | Runs `workflow:` stages with state, retries, approvals, validators, foreach parallelism, revision loops, and runtime dispatch. |
+| Workflow engine | Runs `workflow:` stages with state, retries, approvals, validators, foreach parallelism, revision loops, loop groups, and runtime dispatch. |
 | Project provisioners | Render agent/team workspaces for OpenClaw, Claude Code, Codex, and ClawTeam. This is useful, but no longer the only product center. |
 
 This split matters:
@@ -35,7 +35,7 @@ an OpenClaw installer.
 
 | Area | What it gives you |
 | --- | --- |
-| Workflow manifests | Declarative `workflow:` stages with owners, inputs, outputs, tools, validators, approvals, foreach item pipelines, and runtime/model overrides. |
+| Workflow manifests | Declarative `workflow:` stages with owners, inputs, outputs, tools, validators, approvals, foreach item pipelines, loop groups, and runtime/model overrides. |
 | Flow engine | Resumable execution with `.malaclaw/flow/state.json`, event logs, checkpoints, retry handling, approval queues, and blocker reports. |
 | Worker runtimes | `dry-run`, `script`, `claude-code`, `codex`, `openai-compatible`, and `openai-api`. |
 | Runtime checks | `malaclaw flow runtimes` checks worker availability without spending model quota. |
@@ -268,6 +268,7 @@ Implemented:
 - approval gates and batch review,
 - retries, blocker reports, and validation reports,
 - bounded revision loops with `max_rounds` + `stop_when`,
+- multi-stage loop groups such as `review -> route -> revise -> rebuild`,
 - real worker runtimes for Claude Code and Codex,
 - deterministic `script` runtime,
 - OpenAI-compatible single-output runtime,

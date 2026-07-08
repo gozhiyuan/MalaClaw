@@ -216,6 +216,48 @@ Standard stages can run bounded improvement loops:
 The condition is evaluated against `reports/metrics.json`. Hitting `max_rounds`
 without satisfying the condition is a bounded completion, not an infinite loop.
 
+## Loop Groups
+
+Use `type: loop` when the improvement cycle spans multiple stages. This is the
+shape LongWrite needs for AutoResearch-style quality loops where review,
+routing, revision, and rebuild should repeat together:
+
+```yaml
+- type: loop
+  id: quality
+  max_rounds: 5
+  stop_when: review_score >= 8.0
+  stages:
+    - id: review
+      owner: reviewer
+      outputs:
+        - reviews/scorecard.json
+    - id: route
+      owner: analyst
+      inputs:
+        - reviews/scorecard.json
+      outputs:
+        - reports/routing.md
+    - id: revise
+      owner: editor
+      inputs:
+        - reports/routing.md
+      outputs:
+        - chapters/*.md
+    - id: rebuild
+      owner: builder
+      inputs:
+        - chapters/*.md
+      outputs:
+        - build/manuscript.pdf
+```
+
+Each round scopes child unit keys as `<loop>-r<round>-<stage>`, for example
+`quality-r2-revise`. That keeps prompts, logs, approvals, budget gates, events,
+and usage telemetry inspectable per pass. The loop's own unit records completed
+rounds, and the stop condition is evaluated after each complete child-stage
+sequence.
+
 ## Smoke/Eval
 
 Use smoke-runtime before expensive demos:

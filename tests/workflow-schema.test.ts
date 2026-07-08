@@ -4,6 +4,7 @@ import {
   WorkflowStep,
   StandardStage,
   ForeachStage,
+  LoopStage,
   WorkflowDef,
   Manifest,
 } from "../src/lib/schema.js";
@@ -150,6 +151,55 @@ describe("ForeachStage schema", () => {
     });
     expect(wf.stages).toHaveLength(2);
     expect(wf.max_parallel).toBe(2); // workflow-level global default
+  });
+});
+
+describe("LoopStage schema", () => {
+  it("parses a loop stage with child stages", () => {
+    const stage = LoopStage.parse({
+      type: "loop",
+      id: "quality_loop",
+      max_rounds: 3,
+      stop_when: "review_score >= 8",
+      stages: [
+        { id: "review", owner: "reviewer", outputs: ["reviews/scorecard.json"] },
+        { id: "revise", owner: "editor", inputs: ["reviews/scorecard.json"], outputs: ["chapters/*.md"] },
+        {
+          type: "foreach",
+          id: "rebuild_sections",
+          foreach: "outline.sections",
+          steps: [{ id: "build", owner: "builder", outputs: ["sections/{{item.id}}.md"] }],
+        },
+      ],
+    });
+    expect(stage.stages).toHaveLength(3);
+    expect(stage.max_rounds).toBe(3);
+  });
+
+  it("rejects duplicate child stage ids", () => {
+    expect(() =>
+      LoopStage.parse({
+        type: "loop",
+        id: "quality",
+        max_rounds: 2,
+        stages: [
+          { id: "review", owner: "a" },
+          { id: "review", owner: "b" },
+        ],
+      }),
+    ).toThrow(/duplicate loop child/i);
+  });
+
+  it("rejects unknown keys on loop stages", () => {
+    expect(() =>
+      LoopStage.parse({
+        type: "loop",
+        id: "quality",
+        maxRounds: 2,
+        max_rounds: 2,
+        stages: [{ id: "review", owner: "a" }],
+      }),
+    ).toThrow(/unrecognized key/i);
   });
 });
 

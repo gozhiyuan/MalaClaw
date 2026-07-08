@@ -1,6 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ForeachStage, StandardStage, WorkflowCommand, WorkflowDef, WorkflowStage, WorkflowStep } from "../schema.js";
+import type {
+  ForeachStage,
+  LoopStage,
+  StandardStage,
+  WorkflowCommand,
+  WorkflowDef,
+  WorkflowStage,
+  WorkflowStep,
+} from "../schema.js";
 import {
   appendEvent,
   checkpointsDir,
@@ -60,6 +68,9 @@ export type WorkUnitSpec = {
   itemId?: string;
 };
 
+type ExecutableStage = StandardStage | ForeachStage;
+type StageOutcome = "succeeded" | "failed" | "paused" | "awaiting_review";
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -87,6 +98,7 @@ function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undef
 function needsBudgetApproval(stage: WorkflowStage, workflow: WorkflowDef): boolean {
   const tiers = workflow.model_tiers ?? {};
   const gated = (tierId?: string) => tierId !== undefined && tiers[tierId]?.requires_budget_approval === true;
+  if ("stages" in stage) return stage.stages.some((child) => needsBudgetApproval(child, workflow));
   if ("steps" in stage) return stage.steps.some((step) => gated(step.model_tier));
   return gated(stage.model_tier);
 }
@@ -446,7 +458,7 @@ async function runForeachStage(
   opts: RunFlowOptions,
   state: FlowState,
   runtimeMaxConcurrent: number,
-): Promise<"succeeded" | "failed" | "paused" | "awaiting_review"> {
+): Promise<StageOutcome> {
   await ensureForeachExpansion(stage, opts, state);
   const stageUnit = state.units[stage.id];
   stageUnit.status = "running";
@@ -508,6 +520,149 @@ async function runForeachStage(
   return "succeeded";
 }
 
+function scopeExecutableStage(stage: ExecutableStage, scopedId: string): ExecutableStage {
+  return { ...stage, id: scopedId } as ExecutableStage;
+}
+
+function ensureLoopRoundUnits(stage: LoopStage, state: FlowState, roundNumber: number): void {
+  const roundPrefix = `${stage.id}-r${roundNumber}`;
+  for (const child of stage.stages) {
+    const key = `${roundPrefix}-${child.id}`;
+    state.units[key] ??= {
+      status: "pending",
+      attempts: 0,
+      rounds: 0,
+      approvalGranted: false,
+      budgetApproved: false,
+    };
+  }
+}
+
+async function runExecutableStage(
+  stage: ExecutableStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+  runtimeMaxConcurrent: number,
+): Promise<StageOutcome> {
+  state.units[stage.id] ??= {
+    status: "pending",
+    attempts: 0,
+    rounds: 0,
+    approvalGranted: false,
+    budgetApproved: false,
+  };
+  const unit = state.units[stage.id];
+  if (unit.status === "succeeded") return "succeeded";
+
+  if (state.pendingApprovals.length > 0) return "awaiting_review";
+
+  if (needsBudgetApproval(stage, opts.workflow) && !unit.budgetApproved) {
+    queueBudgetApproval(state, stage.id);
+    await appendEvent(opts.workspaceDir, { type: "flow_paused_budget_approval", key: stage.id });
+    return "awaiting_review";
+  }
+
+  unit.status = "pending";
+  const outcome = "steps" in stage
+    ? await runForeachStage(stage, opts, state, runtimeMaxConcurrent)
+    : await runStandardStage(stage, opts, state);
+
+  if (outcome === "succeeded" && !("steps" in stage) && stage.requires_human_approval) {
+    queueApproval(state, stageToSpec(stage));
+    await appendEvent(opts.workspaceDir, { type: "flow_paused_approval", key: stage.id });
+    return "awaiting_review";
+  }
+
+  return outcome;
+}
+
+async function runLoopStage(
+  stage: LoopStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+  runtimeMaxConcurrent: number,
+): Promise<StageOutcome> {
+  state.units[stage.id] ??= {
+    status: "pending",
+    attempts: 0,
+    rounds: 0,
+    approvalGranted: false,
+    budgetApproved: false,
+  };
+  const unit = state.units[stage.id];
+  if (unit.status === "succeeded") return "succeeded";
+  unit.status = "running";
+
+  let lastCurrent: number | undefined;
+  while (unit.rounds < stage.max_rounds) {
+    const roundNumber = unit.rounds + 1;
+    const roundPrefix = `${stage.id}-r${roundNumber}`;
+    ensureLoopRoundUnits(stage, state, roundNumber);
+    await appendEvent(opts.workspaceDir, {
+      type: "loop_round_started",
+      key: stage.id,
+      round: roundNumber,
+      maxRounds: stage.max_rounds,
+    });
+
+    for (const child of stage.stages) {
+      const scoped = scopeExecutableStage(child, `${roundPrefix}-${child.id}`);
+      const outcome = await runExecutableStage(scoped, opts, state, runtimeMaxConcurrent);
+      await saveFlowState(opts.workspaceDir, state);
+
+      if (outcome === "failed") {
+        unit.status = "failed";
+        return "failed";
+      }
+      if (outcome === "paused") {
+        unit.status = "pending";
+        return "paused";
+      }
+      if (outcome === "awaiting_review") {
+        unit.status = "pending";
+        return "awaiting_review";
+      }
+    }
+
+    unit.rounds += 1;
+    await appendEvent(opts.workspaceDir, {
+      type: "loop_round_completed",
+      key: stage.id,
+      round: unit.rounds,
+    });
+
+    if (stage.stop_when) {
+      const evaluation = await evaluateStopCondition(opts.workspaceDir, stage.stop_when);
+      lastCurrent = evaluation.current;
+      if (evaluation.met) {
+        unit.status = "succeeded";
+        await appendEvent(opts.workspaceDir, {
+          type: "stop_condition_met",
+          key: stage.id,
+          rounds: unit.rounds,
+          current: evaluation.current,
+        });
+        return "succeeded";
+      }
+      if (unit.rounds >= stage.max_rounds) {
+        unit.status = "succeeded";
+        await appendEvent(opts.workspaceDir, {
+          type: "revision_rounds_exhausted",
+          key: stage.id,
+          rounds: unit.rounds,
+          current: lastCurrent,
+          condition: stage.stop_when,
+        });
+        return "succeeded";
+      }
+    }
+  }
+
+  unit.status = "succeeded";
+  await appendEvent(opts.workspaceDir, { type: "unit_succeeded", key: stage.id });
+  return "succeeded";
+}
+
 export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
   const { workflow, workspaceDir } = opts;
 
@@ -542,20 +697,9 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
       return state;
     }
 
-    // Budget gate: stages on a requires_budget_approval tier need explicit
-    // pre-approval before any spend. Granted approval survives resume.
-    if (needsBudgetApproval(stage, workflow) && !unit.budgetApproved) {
-      queueBudgetApproval(state, stage.id);
-      state.status = "paused_for_approval";
-      await appendEvent(workspaceDir, { type: "flow_paused_budget_approval", key: stage.id });
-      await saveFlowState(workspaceDir, state);
-      return state;
-    }
-
-    unit.status = "pending";
-    const outcome = "steps" in stage
-      ? await runForeachStage(stage, opts, state, runtimeMaxConcurrent)
-      : await runStandardStage(stage, opts, state);
+    const outcome = "stages" in stage
+      ? await runLoopStage(stage, opts, state, runtimeMaxConcurrent)
+      : await runExecutableStage(stage, opts, state, runtimeMaxConcurrent);
     await saveFlowState(workspaceDir, state);
 
     if (outcome === "failed") {
@@ -571,14 +715,6 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
     }
 
     if (outcome === "awaiting_review") {
-      state.status = "paused_for_approval";
-      await appendEvent(workspaceDir, { type: "flow_paused_approval", key: stage.id });
-      await saveFlowState(workspaceDir, state);
-      return state;
-    }
-
-    if (!("steps" in stage) && stage.requires_human_approval) {
-      queueApproval(state, stageToSpec(stage));
       state.status = "paused_for_approval";
       await appendEvent(workspaceDir, { type: "flow_paused_approval", key: stage.id });
       await saveFlowState(workspaceDir, state);
