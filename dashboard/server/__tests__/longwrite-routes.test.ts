@@ -8,10 +8,28 @@ import type { FastifyInstance } from "fastify";
 
 let app: FastifyInstance;
 let ws: string;
+let originalLongWriteBin: string | undefined;
 
 beforeAll(async () => {
+  originalLongWriteBin = process.env.MALACLAW_LONGWRITE_BIN;
   ws = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-longwrite-route-"));
-  await fs.mkdir(path.join(ws, ".malaclaw", "flow"), { recursive: true });
+  await fs.mkdir(path.join(ws, ".malaclaw", "flow", "logs"), { recursive: true });
+  const stub = path.join(ws, "longwrite-stub.js");
+  await fs.writeFile(
+    stub,
+    [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const workspace = process.argv[4];",
+      "fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
+      "fs.writeFileSync(path.join(workspace, 'reports', 'human-review-packet.md'), '# Packet\\n');",
+      "console.log('wrote packet');",
+    ].join("\n"),
+    "utf-8",
+  );
+  await fs.chmod(stub, 0o755);
+  process.env.MALACLAW_LONGWRITE_BIN = stub;
   await fs.writeFile(path.join(ws, "longwrite.yaml"), stringifyYaml({
     version: 1,
     project: {
@@ -57,10 +75,13 @@ beforeAll(async () => {
     pendingApprovals: [{ id: "approve-outline-001", stageId: "outline", artifacts: ["outline.md"] }],
     foreachItems: {},
   }), "utf-8");
+  await fs.writeFile(path.join(ws, ".malaclaw", "flow", "logs", "outline-attempt1.log"), "outline worker log", "utf-8");
   app = await createServer({ port: 0 });
 });
 
 afterAll(async () => {
+  if (originalLongWriteBin === undefined) delete process.env.MALACLAW_LONGWRITE_BIN;
+  else process.env.MALACLAW_LONGWRITE_BIN = originalLongWriteBin;
   await app.close();
   await fs.rm(ws, { recursive: true, force: true });
 });
@@ -79,8 +100,31 @@ describe("longwrite routes", () => {
     expect(body.workflow.stages[1].type).toBe("foreach");
     expect(body.workflow.stages[1].steps[0].runtime).toBe("script");
     expect(body.flow.status).toBe("paused_for_approval");
+    expect(body.logs[0].name).toBe("outline-attempt1.log");
+    expect(body.logs[0].content).toContain("outline worker log");
     expect(body.commands.run).toContain("--runtime 'codex'");
     expect(body.commands.packet).toContain("longwrite report packet");
+  });
+
+  it("POST /api/longwrite/approve grants pending approvals", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/approve",
+      payload: { dir: ws, approvalId: "approve-outline-001" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().state.pendingApprovals).toHaveLength(0);
+  });
+
+  it("POST /api/longwrite/packet delegates to the LongWrite CLI", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/packet",
+      payload: { dir: ws },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().stdout).toContain("wrote packet");
+    expect(await fs.readFile(path.join(ws, "reports", "human-review-packet.md"), "utf-8")).toContain("Packet");
   });
 
   it("shell-quotes command hints without allowing shell expansion", async () => {

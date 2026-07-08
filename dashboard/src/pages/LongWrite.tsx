@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 type LongWriteResponse = {
   dir: string;
@@ -30,9 +30,10 @@ type LongWriteResponse = {
     status: string;
     updatedAt: string;
     units: Record<string, { status: string }>;
-    pendingApprovals: Array<{ id: string; stageId: string }>;
+    pendingApprovals: Array<{ id: string; stageId: string; stepId?: string; itemId?: string; artifacts?: string[] }>;
   } | null;
   usage: { totalTokens: number; costUsd: number; unitsWithUsage: number } | null;
+  logs: Array<{ name: string; content: string; truncated: boolean }>;
   commands: { status: string; run: string; approve: string; packet: string };
 };
 
@@ -86,10 +87,44 @@ function smallLabel(value: string) {
   return <span style={{ color: "#8b949e", fontSize: 12 }}>{value}</span>;
 }
 
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((payload as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export function LongWrite() {
   const [dir, setDir] = useState(() => localStorage.getItem("longwrite-dir") ?? "");
   const [input, setInput] = useState(dir);
+  const [operationMessage, setOperationMessage] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const { data, error, isLoading } = useLongWrite(dir);
+
+  const approve = useMutation({
+    mutationFn: (body: { approvalId?: string; batch?: boolean }) =>
+      postJson<{ ok: boolean }>("/api/longwrite/approve", { dir, ...body }),
+    onSuccess: (_, body) => {
+      setOperationMessage(body.batch ? "Approved all pending approvals." : "Approved pending item.");
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
+  const packet = useMutation({
+    mutationFn: () => postJson<{ ok: boolean; artifact: string; stdout?: string }>("/api/longwrite/packet", { dir }),
+    onSuccess: (result) => {
+      setOperationMessage(`Generated ${result.artifact}.`);
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
 
   const load = () => {
     localStorage.setItem("longwrite-dir", input);
@@ -136,6 +171,7 @@ export function LongWrite() {
       {!dir && <div style={{ color: "#8b949e" }}>Enter a LongWrite workspace directory.</div>}
       {isLoading && dir && <div style={{ color: "#8b949e" }}>Loading LongWrite workspace...</div>}
       {error != null && <div style={{ color: "#f85149" }}>Error: {String(error)}</div>}
+      {operationMessage && <div style={{ color: operationMessage.includes("failed") || operationMessage.includes("not found") ? "#f85149" : "#8b949e" }}>{operationMessage}</div>}
 
       {data && (
         <>
@@ -173,6 +209,65 @@ export function LongWrite() {
               </div>
             </Section>
           </div>
+
+          <Section title="Operations">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => approve.mutate({ batch: true })}
+                disabled={!data.flow?.pendingApprovals.length || approve.isPending}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #30363d",
+                  background: data.flow?.pendingApprovals.length ? "#238636" : "#21262d",
+                  color: "#fff",
+                  cursor: data.flow?.pendingApprovals.length ? "pointer" : "not-allowed",
+                }}
+              >
+                Approve all
+              </button>
+              <button
+                onClick={() => packet.mutate()}
+                disabled={packet.isPending}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #30363d",
+                  background: "#1f6feb",
+                  color: "#fff",
+                  cursor: packet.isPending ? "wait" : "pointer",
+                }}
+              >
+                Generate packet
+              </button>
+            </div>
+            {data.flow?.pendingApprovals.length ? (
+              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                {data.flow.pendingApprovals.map((approval) => (
+                  <div key={approval.id} style={{ display: "flex", alignItems: "center", gap: 8, color: "#8b949e", fontSize: 13 }}>
+                    <button
+                      onClick={() => approve.mutate({ approvalId: approval.id })}
+                      disabled={approve.isPending}
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        border: "1px solid #30363d",
+                        background: "#238636",
+                        color: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <code style={{ color: "#c9d1d9" }}>{approval.id}</code>
+                    <span>{[approval.stageId, approval.stepId, approval.itemId].filter(Boolean).join(" / ")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, color: "#8b949e", fontSize: 13 }}>No pending approvals.</div>
+            )}
+          </Section>
 
           <Section title="Commands">
             <div style={{ display: "grid", gap: 8 }}>
@@ -215,6 +310,34 @@ export function LongWrite() {
                 ))}
               </tbody>
             </table>
+          </Section>
+
+          <Section title="Recent logs">
+            {data.logs.length === 0 ? (
+              <div style={{ color: "#8b949e", fontSize: 13 }}>No worker logs found.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {data.logs.map((log) => (
+                  <details key={log.name} open={data.logs.length === 1}>
+                    <summary style={{ color: "#58a6ff", cursor: "pointer", fontFamily: "monospace", fontSize: 13 }}>
+                      {log.name}{log.truncated ? " (tail)" : ""}
+                    </summary>
+                    <pre style={{
+                      margin: "6px 0 0",
+                      padding: 10,
+                      maxHeight: 260,
+                      overflow: "auto",
+                      whiteSpace: "pre-wrap",
+                      background: "#0d1117",
+                      border: "1px solid #30363d",
+                      borderRadius: 6,
+                      color: "#c9d1d9",
+                      fontSize: 12,
+                    }}>{log.content}</pre>
+                  </details>
+                ))}
+              </div>
+            )}
           </Section>
         </>
       )}

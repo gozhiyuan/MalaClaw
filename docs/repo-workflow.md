@@ -131,5 +131,6 @@ The dashboard reads project manifests, lockfiles, telemetry, and starter
 metadata. It is useful for inspecting provisioned projects and active flow
 runs. The LongWrite tab reads a writing workspace, summarizes `longwrite.yaml`,
 the compiled `malaclaw.yaml`, runtime/model policy, review cadence, flow status,
-token/cost telemetry, and command hints, then links into the Flow monitor for
-logs and approvals.
+token/cost telemetry, command hints, and recent worker logs. It can approve
+pending LongWrite gates and generate `reports/human-review-packet.md`, then
+links into the Flow monitor for deeper logs and events.

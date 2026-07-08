@@ -1,8 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadFlowState } from "../../../dist/lib/workflow/state.js";
+import { loadFlowState, logsDir } from "../../../dist/lib/workflow/state.js";
+import { approveAllFlow, approveFlow } from "../../../dist/lib/workflow/engine.js";
 import { summarizeUsage } from "../../../dist/commands/flow.js";
 
 type YamlRecord = Record<string, unknown>;
@@ -20,6 +22,9 @@ type StageSummary = {
   steps: Array<{ id: string; owner?: string; runtime?: string; model?: string; modelTier?: string }>;
   outputs: string[];
 };
+
+const LOG_TAIL_BYTES = 10_000;
+const MAX_OPERATION_OUTPUT = 20_000;
 
 async function readTextIfExists(absPath: string): Promise<string | null> {
   try {
@@ -106,6 +111,50 @@ function approveCommand(workspaceDir: string, batchApprovals: boolean): string {
   return batchApprovals ? `longwrite approve ${shellQuote(workspaceDir)} --batch` : `longwrite status ${shellQuote(workspaceDir)}`;
 }
 
+async function recentLogs(workspaceDir: string): Promise<Array<{ name: string; content: string; truncated: boolean }>> {
+  const dir = logsDir(workspaceDir);
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const entries = await Promise.all(
+    names.sort().slice(-3).map(async (name) => {
+      const raw = await fs.readFile(path.join(dir, name), "utf-8");
+      return {
+        name,
+        content: raw.slice(-LOG_TAIL_BYTES),
+        truncated: raw.length > LOG_TAIL_BYTES,
+      };
+    }),
+  );
+  return entries;
+}
+
+function longwriteBin(): string {
+  return process.env.MALACLAW_LONGWRITE_BIN ?? process.env.LONGWRITE_BIN ?? "longwrite";
+}
+
+function runLongWrite(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(longwriteBin(), args, { cwd, shell: false });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout = (stdout + chunk.toString()).slice(-MAX_OPERATION_OUTPUT);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-MAX_OPERATION_OUTPUT);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`${longwriteBin()} ${args.join(" ")} failed with exit code ${code}${stderr ? `: ${stderr}` : ""}`));
+    });
+  });
+}
+
 const routes: FastifyPluginAsync = async (app) => {
   app.get("/api/longwrite", async (req, reply) => {
     const workspaceDir = requireDir((req.query as { dir?: string }).dir);
@@ -123,12 +172,15 @@ const routes: FastifyPluginAsync = async (app) => {
 
     let flow = null;
     let usage = null;
+    let logs: Array<{ name: string; content: string; truncated: boolean }> = [];
     try {
       flow = await loadFlowState(workspaceDir);
       usage = await summarizeUsage(workspaceDir);
+      logs = await recentLogs(workspaceDir);
     } catch {
       flow = null;
       usage = null;
+      logs = [];
     }
 
     return {
@@ -158,6 +210,7 @@ const routes: FastifyPluginAsync = async (app) => {
       },
       flow,
       usage,
+      logs,
       commands: {
         status: `longwrite status ${shellQuote(workspaceDir)}`,
         run: runCommand(workspaceDir, runtime),
@@ -165,6 +218,28 @@ const routes: FastifyPluginAsync = async (app) => {
         packet: `longwrite report packet ${shellQuote(workspaceDir)}`,
       },
     };
+  });
+
+  app.post("/api/longwrite/approve", async (req, reply) => {
+    const { dir, approvalId, batch } = (req.body ?? {}) as { dir?: string; approvalId?: string; batch?: boolean };
+    const workspaceDir = requireDir(dir);
+    try {
+      const state = batch ? await approveAllFlow(workspaceDir) : await approveFlow(workspaceDir, approvalId ?? "");
+      return { ok: true, state };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/longwrite/packet", async (req, reply) => {
+    const { dir } = (req.body ?? {}) as { dir?: string };
+    const workspaceDir = requireDir(dir);
+    try {
+      const result = await runLongWrite(["report", "packet", workspaceDir], workspaceDir);
+      return { ok: true, ...result, artifact: "reports/human-review-packet.md" };
+    } catch (err) {
+      return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 };
 

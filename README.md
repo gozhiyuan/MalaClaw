@@ -235,8 +235,9 @@ malaclaw dashboard
 The dashboard includes a Flow monitor for active workflow runs and a LongWrite
 tab for writing workspaces. The LongWrite tab reads `longwrite.yaml`, compiled
 `malaclaw.yaml`, review cadence, runtime/model policy, current flow status,
-token/cost telemetry, and command hints, then links into the Flow monitor for
-logs and approvals.
+token/cost telemetry, command hints, and recent worker logs. It can approve
+pending LongWrite gates and generate `reports/human-review-packet.md`, then
+links into the Flow monitor for deeper logs and events.
 
 ## Repository Layout
 
