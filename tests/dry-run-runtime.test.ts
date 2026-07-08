@@ -57,6 +57,26 @@ describe("DryRunRuntime", () => {
     expect(content).toBe("# The Real Plan");
   });
 
+  it("prefers workspace fixtures from .malaclaw/fixtures/<output>", async () => {
+    const ws = await makeWorkspace();
+    const fixtureDir = path.join(ws, ".malaclaw", "fixtures", "reviews");
+    await fs.mkdir(fixtureDir, { recursive: true });
+    await fs.writeFile(path.join(fixtureDir, "scorecard.json"), `{"personas":[]}`, "utf-8");
+    const rt = new DryRunRuntime();
+    await rt.runStage(request(ws, { outputs: ["reviews/scorecard.json"] }));
+    const content = await fs.readFile(path.join(ws, "reviews", "scorecard.json"), "utf-8");
+    expect(content).toBe(`{"personas":[]}`);
+  });
+
+  it("constructor fixtures beat workspace fixtures", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, ".malaclaw", "fixtures"), { recursive: true });
+    await fs.writeFile(path.join(ws, ".malaclaw", "fixtures", "plan.md"), "workspace", "utf-8");
+    const rt = new DryRunRuntime({ fixtures: { "plan.md": "constructor" } });
+    await rt.runStage(request(ws));
+    expect(await fs.readFile(path.join(ws, "plan.md"), "utf-8")).toBe("constructor");
+  });
+
   it("plays scripted outcomes per unit before succeeding", async () => {
     const ws = await makeWorkspace();
     const rt = new DryRunRuntime({ outcomes: { plan: ["rate_limited", "success"] } });

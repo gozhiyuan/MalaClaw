@@ -15,6 +15,14 @@ function isConcrete(outputPath: string): boolean {
   return !outputPath.includes("*") && !outputPath.includes("{{");
 }
 
+async function readIfExists(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
 /** Deterministic runtime for tests, CI, and workflow dry runs. Writes every
  *  concrete declared output (fixture content or a placeholder) and never
  *  calls a model. */
@@ -44,8 +52,15 @@ export class DryRunRuntime implements WorkerRuntime {
       // Never write outside the workspace, whatever the manifest says.
       const filePath = resolveWithin(req.workspaceDir, output);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
+      // Workspace-provided fixtures (.malaclaw/fixtures/<output>) let domain
+      // layers make dry runs satisfy their own external validators without
+      // this runtime knowing anything about them.
+      const workspaceFixture = await readIfExists(
+        resolveWithin(path.join(req.workspaceDir, ".malaclaw", "fixtures"), output),
+      );
       const content =
         this.fixtures[output] ??
+        workspaceFixture ??
         (output.endsWith(".json")
           ? JSON.stringify({
               sections: [{ id: "section-1" }, { id: "section-2" }],
