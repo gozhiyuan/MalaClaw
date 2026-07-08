@@ -52,12 +52,17 @@ export class DryRunRuntime implements WorkerRuntime {
       // Never write outside the workspace, whatever the manifest says.
       const filePath = resolveWithin(req.workspaceDir, output);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      // Workspace-provided fixtures (.malaclaw/fixtures/<output>) let domain
-      // layers make dry runs satisfy their own external validators without
-      // this runtime knowing anything about them.
-      const workspaceFixture = await readIfExists(
-        resolveWithin(path.join(req.workspaceDir, ".malaclaw", "fixtures"), output),
+      // Workspace-provided fixtures let domain layers make dry runs satisfy
+      // their own external validators without this runtime knowing anything
+      // about them. Unit-scoped fixtures (units/<unitKey>/<output>) beat the
+      // shared ones so loop rounds can produce different content — e.g. a
+      // review scorecard that improves across quality-loop rounds.
+      const fixturesRoot = path.join(req.workspaceDir, ".malaclaw", "fixtures");
+      const unitFixture = await readIfExists(
+        resolveWithin(path.join(fixturesRoot, "units", req.unitKey), output),
       );
+      const workspaceFixture =
+        unitFixture ?? (await readIfExists(resolveWithin(fixturesRoot, output)));
       const content =
         this.fixtures[output] ??
         workspaceFixture ??

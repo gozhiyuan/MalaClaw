@@ -68,6 +68,24 @@ describe("DryRunRuntime", () => {
     expect(content).toBe(`{"personas":[]}`);
   });
 
+  it("unit-scoped fixtures beat shared workspace fixtures", async () => {
+    const ws = await makeWorkspace();
+    const shared = path.join(ws, ".malaclaw", "fixtures", "reviews");
+    const scoped = path.join(ws, ".malaclaw", "fixtures", "units", "loop-r2-review", "reviews");
+    await fs.mkdir(shared, { recursive: true });
+    await fs.mkdir(scoped, { recursive: true });
+    await fs.writeFile(path.join(shared, "scorecard.json"), `{"round":"base"}`, "utf-8");
+    await fs.writeFile(path.join(scoped, "scorecard.json"), `{"round":"two"}`, "utf-8");
+    const rt = new DryRunRuntime();
+
+    await rt.runStage(request(ws, { unitKey: "loop-r2-review", outputs: ["reviews/scorecard.json"] }));
+    expect(await fs.readFile(path.join(ws, "reviews", "scorecard.json"), "utf-8")).toBe(`{"round":"two"}`);
+
+    // Units without a scoped fixture fall back to the shared one.
+    await rt.runStage(request(ws, { unitKey: "loop-r3-review", outputs: ["reviews/scorecard.json"] }));
+    expect(await fs.readFile(path.join(ws, "reviews", "scorecard.json"), "utf-8")).toBe(`{"round":"base"}`);
+  });
+
   it("constructor fixtures beat workspace fixtures", async () => {
     const ws = await makeWorkspace();
     await fs.mkdir(path.join(ws, ".malaclaw", "fixtures"), { recursive: true });
