@@ -65,8 +65,50 @@ runtime only runs one unit headlessly.
 | `codex` | harness | Headless `codex exec` worker. |
 | `openai-compatible` | API/local | Single-output chat-completions worker. |
 | `openai-api` | API alias | Hosted OpenAI-compatible use. |
+| `ollama` | API/local alias | `openai-compatible` pointed at `http://127.0.0.1:11434/v1`. |
+| `anthropic-api` | API | Single-output Anthropic Messages worker (`ANTHROPIC_API_KEY`). |
+| `gemini-api` | API | Single-output Gemini generateContent worker (`GEMINI_API_KEY`). |
 
 Use `malaclaw flow runtimes` before real runs.
+
+## Choosing a Worker Runtime
+
+The axis that matters is not just cost — it is **single-shot vs agentic**.
+API/local runtimes send one prompt and write one response into one concrete
+output file. CLI harness runtimes read the workspace, write multiple files,
+and run tools.
+
+| Stage shape | Use | Why |
+| --- | --- | --- |
+| Contract check, CI | `dry-run` | Free; validates workflow wiring only. |
+| Deterministic transform (retrieval, scoring, build helpers) | `script` | Reproducible, no model. |
+| One text artifact, low stakes (summaries, classification, review text) | `ollama` / `openai-compatible` | Cheapest real text; no tool harness. |
+| One text artifact, higher quality | `anthropic-api` / `gemini-api` / `openai-api` | Better hosted reasoning; still single-output, no tools. |
+| Multi-file edits, shell tools, build/debug loops, skills/MCP | `claude-code` / `codex` | Expensive but the only runtimes with a real tool harness. |
+
+Rule of thumb: put agentic spend where judgment lives (outline, review,
+revision, build) and route everything else down-tier. Single-output runtimes
+return `tool_missing` if a stage declares more than one concrete output —
+that is the contract telling you the stage needs a harness runtime.
+
+## Budget Approval Gates
+
+Mark expensive tiers with `requires_budget_approval`:
+
+```yaml
+workflow:
+  model_tiers:
+    strong:
+      runtime: codex
+      model: gpt-5.5
+      requires_budget_approval: true
+```
+
+Any stage (or foreach step) resolving to that tier pauses the flow **before
+spending**, queues an `approve-budget-<stage>-*` approval, and resumes
+through `malaclaw flow approve <id>`. Granted budget approvals survive
+resume and are distinct from post-success review gates
+(`requires_human_approval`).
 
 ## Stage Runtime Selection
 

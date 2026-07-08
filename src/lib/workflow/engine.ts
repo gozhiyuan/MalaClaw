@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ForeachStage, StandardStage, WorkflowCommand, WorkflowDef, WorkflowStep } from "../schema.js";
+import type { ForeachStage, StandardStage, WorkflowCommand, WorkflowDef, WorkflowStage, WorkflowStep } from "../schema.js";
 import {
   appendEvent,
   checkpointsDir,
@@ -80,6 +80,27 @@ function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undef
   if (spec.model) return spec.model;
   if (spec.model_tier) return workflow.model_tiers?.[spec.model_tier]?.model;
   return undefined;
+}
+
+/** True when any unit of this stage resolves to a model tier marked
+ *  requires_budget_approval — the stage must be pre-approved before spend. */
+function needsBudgetApproval(stage: WorkflowStage, workflow: WorkflowDef): boolean {
+  const tiers = workflow.model_tiers ?? {};
+  const gated = (tierId?: string) => tierId !== undefined && tiers[tierId]?.requires_budget_approval === true;
+  if ("steps" in stage) return stage.steps.some((step) => gated(step.model_tier));
+  return gated(stage.model_tier);
+}
+
+function queueBudgetApproval(state: FlowState, stageId: string): void {
+  if (state.pendingApprovals.some((a) => a.stageId === stageId && a.id.startsWith("approve-budget-"))) {
+    return;
+  }
+  state.units[stageId].approvalGranted = false;
+  state.pendingApprovals.push({
+    id: `approve-budget-${stageId}-${String(state.pendingApprovals.length + 1).padStart(3, "0")}`,
+    stageId,
+    artifacts: [],
+  });
 }
 
 async function checkpointOutputs(workspaceDir: string, unitKey: string, outputs: string[]): Promise<void> {
@@ -515,6 +536,16 @@ export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
 
     if (state.pendingApprovals.length > 0) {
       state.status = "paused_for_approval";
+      await saveFlowState(workspaceDir, state);
+      return state;
+    }
+
+    // Budget gate: stages on a requires_budget_approval tier need explicit
+    // pre-approval before any spend. Granted approval survives resume.
+    if (needsBudgetApproval(stage, workflow) && !unit.approvalGranted) {
+      queueBudgetApproval(state, stage.id);
+      state.status = "paused_for_approval";
+      await appendEvent(workspaceDir, { type: "flow_paused_budget_approval", key: stage.id });
       await saveFlowState(workspaceDir, state);
       return state;
     }

@@ -126,17 +126,33 @@ malaclaw flow run --runtime codex
 | `codex` | Real Codex headless work | Uses `codex exec`; suitable for file-editing stages. |
 | `openai-compatible` | Cheap/local single-output text stages | Calls `/chat/completions`; writes one response into one concrete output. |
 | `openai-api` | Alias for hosted OpenAI-compatible use | Uses the same runtime implementation as `openai-compatible`. |
+| `ollama` | Free local single-output text stages | `openai-compatible` preset for `http://127.0.0.1:11434/v1`. |
+| `anthropic-api` | Hosted Claude single-output text stages | Anthropic Messages API; needs `ANTHROPIC_API_KEY`. |
+| `gemini-api` | Hosted Gemini single-output text stages | `generateContent` API; needs `GEMINI_API_KEY`. |
 
-OpenAI-compatible environment variables:
+API runtime environment variables:
 
 ```bash
+# openai-compatible / openai-api
 export MALACLAW_OPENAI_BASE_URL=http://127.0.0.1:11434/v1
 export MALACLAW_OPENAI_API_KEY=...
 export MALACLAW_OPENAI_MODEL=...
+
+# ollama alias
+export MALACLAW_OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+export MALACLAW_OLLAMA_MODEL=llama3.1:8b
+
+# anthropic-api / gemini-api
+export MALACLAW_ANTHROPIC_API_KEY=...   # or ANTHROPIC_API_KEY
+export MALACLAW_ANTHROPIC_MODEL=claude-sonnet-5
+export MALACLAW_GEMINI_API_KEY=...      # or GEMINI_API_KEY / GOOGLE_API_KEY
+export MALACLAW_GEMINI_MODEL=gemini-2.5-flash
 ```
 
 For local servers, `MALACLAW_OPENAI_API_KEY` is optional when the base URL is
-localhost.
+localhost. See [docs/workflow-runtime.md](./docs/workflow-runtime.md) for
+choosing between single-shot API runtimes and agentic CLI harnesses, model
+tiers, and budget approval gates.
 
 ## Provisioning Adapters
 
