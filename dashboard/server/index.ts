@@ -14,6 +14,7 @@ import healthRoutes from "./routes/health.js";
 import starterRoutes from "./routes/starters.js";
 import manifestRoutes from "./routes/manifest.js";
 import diffRoutes from "./routes/diff.js";
+import flowRoutes from "./routes/flow.js";
 import { RuntimeStatusProvider } from "./services/runtime-status.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { MemoryWriter } from "./services/memory-writer.js";
@@ -94,6 +95,7 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   await app.register(starterRoutes);
   await app.register(manifestRoutes);
   await app.register(diffRoutes);
+  await app.register(flowRoutes);
   await app.register(createUsageRoutes(statusProvider));
 
   const memoryWriter = new MemoryWriter();

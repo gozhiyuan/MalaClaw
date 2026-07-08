@@ -3,12 +3,14 @@ import { Dashboard } from "./pages/Dashboard";
 import { Projects } from "./pages/Projects";
 import { Starters } from "./pages/Starters";
 import { Config } from "./pages/Config";
+import { Flow } from "./pages/Flow";
 import { useWs } from "./hooks/useWs";
 
 export function App() {
   useWs();
   const tabs = [
     { to: "/", label: "Overview" },
+    { to: "/flow", label: "Flow" },
     { to: "/projects", label: "Projects" },
     { to: "/starters", label: "Starters" },
     { to: "/config", label: "Config" },
@@ -42,6 +44,7 @@ export function App() {
       <main style={{ padding: 12 }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/flow" element={<Flow />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/starters" element={<Starters />} />
           <Route path="/config" element={<Config />} />
