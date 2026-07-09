@@ -58,7 +58,13 @@ stays stable across MalaClaw versions.
 
 ## Client extensions
 
-The client side is currently bundled at build time from a sibling checkout.
-A packaged client-extension story (prebuilt bundle copied into the dashboard
-build) is planned; full dynamic remote module loading is explicitly out of
-scope for alpha.
+The client side is bundled at dashboard build time. During source builds, the
+dashboard generator checks for known sibling product checkouts such as
+`../longwrite-agent`; if present, their client tabs are included. If not, the
+core MalaClaw dashboard still builds and ships without downstream tabs.
+
+Packaged MalaClaw releases serve the already-built client bundle under
+`dashboard/dist/client`. Server extensions remain loaded at runtime from the
+config above, so product routes can come from an installed package even when the
+client tab was not present at MalaClaw build time. Full dynamic remote module
+loading is explicitly out of scope for alpha.

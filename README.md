@@ -50,6 +50,12 @@ an OpenClaw installer.
 npm install
 npm run build
 npm test
+
+# Optional dashboard assets for source checkout or npm publishing:
+cd dashboard
+npm install
+npm run build
+npm test
 ```
 
 Check worker runtime availability:
@@ -237,25 +243,26 @@ you intentionally want LAN access, and pair it with `--auth-token <token>` when
 other machines can reach the port.
 
 The dashboard includes a Flow monitor for active workflow runs and supports
-product-specific extensions. LongWrite is bundled as the first alpha extension,
-not as a core dashboard dependency; its client source is owned by
-`longwrite-agent/dashboard-extension`. Its tab reads `longwrite.yaml`, compiled
-`malaclaw.yaml`, review cadence, runtime/model policy, current flow status,
-token/cost telemetry, command hints, recent worker logs, and dashboard-launched
-run output. It can start one LongWrite run per workspace, reject duplicate
-runs, edit the stable `longwrite.yaml` project/research/review fields through
-LongWrite's config validator, sync derived LongWrite files, approve pending
-LongWrite gates, and generate `reports/human-review-packet.md`, then links into
-the Flow monitor for deeper logs and events. The workflow graph panel visualizes
-compiled stages and can save advanced runtime/model/approval overrides directly
-to `malaclaw.yaml`; `longwrite sync` regenerates those overrides from
-`longwrite.yaml` when you want to return to the stable config path.
+product-specific extensions. LongWrite is the first alpha extension, but it is
+not a core dashboard dependency: LongWrite owns its routes and product tab under
+`longwrite-agent/dashboard-extension`.
 
-Server-side dashboard extensions are loaded from installed modules or local
-files with `MALACLAW_DASHBOARD_SERVER_EXTENSIONS`:
+When the MalaClaw dashboard is built from a checkout that has
+`../longwrite-agent`, the LongWrite client tab is included in the built
+dashboard. Standalone MalaClaw builds omit downstream client tabs and still
+serve the core Flow monitor. Server-side extension routes are loaded at runtime
+from installed modules or local files with `MALACLAW_DASHBOARD_SERVER_EXTENSIONS`
+or `~/.malaclaw/dashboard.yaml`:
+
+```yaml
+dashboard:
+  server_extensions:
+    - /path/to/longwrite-agent/dashboard-extension/dist/server/index.js
+```
 
 ```bash
 export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/longwrite-agent/dashboard-extension/dist/server/index.js"
+malaclaw dashboard-extensions doctor
 malaclaw dashboard
 ```
 

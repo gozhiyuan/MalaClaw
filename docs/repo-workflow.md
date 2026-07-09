@@ -147,11 +147,13 @@ Dashboard extension code is isolated from the core shell:
 
 ```text
 dashboard/server/extensions/<id>/
-dashboard/src/extensions/<id>/
+dashboard/src/extensions/generated.tsx
 ```
 
-Core dashboard code consumes the generic extension registries and should not
-import downstream product routes or pages directly.
+Core dashboard code consumes generic extension registries and should not import
+downstream product routes directly. The client registry is generated at
+dashboard build time so MalaClaw can build standalone while still including
+local product tabs when sibling checkouts are present.
 
 For the LongWrite alpha extension, the React page source is owned by the
 LongWrite repo at:

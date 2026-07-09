@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
+import { existsSync } from "node:fs";
 import { addClient, broadcast } from "./ws.js";
 import { startWatcher, stopWatcher } from "./watcher.js";
 import path from "node:path";
@@ -26,6 +27,16 @@ import { approveAllFlow, approveFlow } from "../../dist/lib/workflow/engine.js";
 import { summarizeUsage } from "../../dist/commands/flow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function resolveClientRoot(): string {
+  const candidates = [
+    // Built server: dashboard/dist/server -> dashboard/dist/client
+    path.join(__dirname, "../client"),
+    // Source/dev server: dashboard/server -> dashboard/dist/client
+    path.join(__dirname, "../dist/client"),
+  ];
+  return candidates.find((candidate) => existsSync(path.join(candidate, "index.html"))) ?? candidates[0];
+}
 
 type HttpError = Error & {
   statusCode?: number;
@@ -85,7 +96,7 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   // Static files in production
   if (!isDev) {
     await app.register(fastifyStatic, {
-      root: path.join(__dirname, "../dist/client"),
+      root: resolveClientRoot(),
       wildcard: false,
     });
     // SPA fallback (only for non-API routes)

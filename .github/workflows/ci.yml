@@ -51,3 +51,6 @@ jobs:
 
       - name: Verify npm package contents
         run: npm pack --dry-run
+
+      - name: Smoke packed dashboard
+        run: npm run smoke:package

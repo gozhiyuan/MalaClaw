@@ -7,12 +7,12 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "dev": "concurrently \"tsx watch server/index.ts\" \"vite\"",
-    "build": "tsc -p tsconfig.server.json && vite build",
-    "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "vite build",
+    "dev": "node scripts/generate-client-extensions.mjs && concurrently \"tsx watch server/index.ts\" \"vite\"",
+    "build": "node scripts/generate-client-extensions.mjs && tsc -p tsconfig.server.json && node scripts/copy-server-build.mjs && vite build",
+    "build:server": "tsc -p tsconfig.server.json && node scripts/copy-server-build.mjs",
+    "build:client": "node scripts/generate-client-extensions.mjs && vite build",
     "preview": "node dist/server/index.js",
-    "test": "vitest run"
+    "test": "node scripts/generate-client-extensions.mjs && vitest run"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
