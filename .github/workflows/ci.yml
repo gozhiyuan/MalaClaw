@@ -48,3 +48,6 @@ jobs:
       - name: Build dashboard
         working-directory: dashboard
         run: npm run build
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run
