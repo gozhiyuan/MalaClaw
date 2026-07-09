@@ -207,6 +207,22 @@ workflow:
 Fallback is not silent. Runtime/model choices are recorded in flow state and
 events.
 
+## Advisor / Executor Pattern
+
+MalaClaw can split expensive decision-making from bulk execution by using
+`model_tiers`. A common setup is:
+
+- `advisor`: high-judgment Claude runtime for strategy, outline, routing, and
+  hard review.
+- `reviewer`: cheaper strong model for routine review.
+- `executor`: Codex, Claude Code, API runtime, or `script` for drafting,
+  file edits, builds, and validators.
+
+See [Advisor / Executor Runtime Split](patterns/advisor-executor.md) for the
+full template. LongWrite also ships `codex_first` and
+`claude_advisor_sonnet` runtime profiles that compile this pattern into
+generated `malaclaw.yaml` files.
+
 ## Outcomes
 
 Worker outcomes are normalized:

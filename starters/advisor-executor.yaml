@@ -1,0 +1,33 @@
+id: advisor-executor
+version: 1
+name: Advisor / Executor Runtime Split
+description: >
+  A workflow pattern for using a high-judgment model only for strategy,
+  routing, and review while cheaper or better-suited runtimes perform bulk
+  execution. Use this when a project should spend premium tokens on decisions,
+  not every generated artifact.
+source_usecase: Advisor / Executor Runtime Split
+entry_team: manuscript-writing
+packs:
+  - manuscript-writing
+project_skills:
+  - malaclaw-cook
+installable_skills: []
+tags:
+  - workflow
+  - runtime-profile
+  - advisor
+  - executor
+  - codex-first
+required_apis: []
+required_capabilities:
+  - claude-code or anthropic-api for advisor stages
+  - codex, claude-code, or script for executor stages
+external_requirements:
+  - Configure the worker runtimes used by your selected model_tiers.
+bootstrap_prompt: >
+  Start a MalaClaw project using the advisor/executor split. Define model_tiers
+  such as advisor, reviewer, and executor. Route outline, strategy, review, and
+  revision-routing stages to advisor/reviewer tiers; route drafting, file edits,
+  builds, and deterministic validation to executor or script tiers. Keep premium
+  model use explicit with budget approval gates.

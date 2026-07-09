@@ -95,6 +95,35 @@ function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undef
   return undefined;
 }
 
+/** When a unit produces the artifact a later foreach stage fans out over,
+ *  the worker must be told the required JSON shape — discovered the hard way
+ *  in the first novel flagship run, where a rich outline.json lacked the
+ *  "chapters" id array and the fan-out had nothing to expand. */
+function foreachContractNotes(workflow: WorkflowDef, spec: WorkUnitSpec): string[] {
+  const notes: string[] = [];
+  const visit = (stage: WorkflowStage): void => {
+    if ("stages" in stage) {
+      for (const child of stage.stages) visit(child);
+      return;
+    }
+    if (!("steps" in stage)) return;
+    const dot = stage.foreach.indexOf(".");
+    const base = dot === -1 ? stage.foreach : stage.foreach.slice(0, dot);
+    const key = dot === -1 ? "items" : stage.foreach.slice(dot + 1);
+    const artifact = `${base}.json`;
+    if (spec.outputs.includes(artifact)) {
+      notes.push(
+        `${artifact} MUST be JSON with a top-level "${key}" array of objects, ` +
+        `each carrying a unique string "id" (start with a letter/digit; then letters, digits, ".", "_", "-"; ` +
+        `e.g. "chapter-001"). Stage "${stage.id}" creates one work item per id — without them it cannot run. ` +
+        `Additional fields per object are welcome.`,
+      );
+    }
+  };
+  for (const stage of workflow.stages) visit(stage);
+  return notes;
+}
+
 /** Capability requirements a unit's declaration implies. */
 function unitCapabilityFindings(
   spec: WorkUnitSpec,
@@ -261,7 +290,10 @@ async function runUnit(
         skillDocs.push({ path: skillPath, content: "(skill document missing from workspace)" });
       }
     }
-    const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback, skillDocs });
+    const prompt = renderUnitPrompt({
+      stage: spec, unitKey, retryFeedback, skillDocs,
+      contractNotes: foreachContractNotes(workflow, spec),
+    });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
     // Revision rounds reset the attempt counter, so tag the round to keep
     // round 2 from overwriting round 1's prompt and log.

@@ -260,3 +260,35 @@ describe("anthropic-api declared-command tool", () => {
     }
   });
 });
+
+describe("foreach contract notes", () => {
+  it("tells the producing stage the exact fan-out shape", async () => {
+    const ws = await makeWorkspace();
+    const seen: string[] = [];
+    const inner = new DryRunRuntime();
+    const spy = {
+      id: "dry-run",
+      capabilities: inner.capabilities,
+      checkAvailable: () => inner.checkAvailable(),
+      runStage: async (req: Parameters<DryRunRuntime["runStage"]>[0]) => {
+        seen.push(req.instructions);
+        return inner.runStage(req);
+      },
+    };
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "plot_outline", owner: "architect", outputs: ["outline/plot.md", "outline.json"] },
+        {
+          id: "draft_chapters", type: "foreach", foreach: "outline.chapters", item_name: "chapter",
+          steps: [{ id: "draft", owner: "writer", outputs: ["chapters/{{chapter.id}}.md"] }],
+        },
+      ],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: spy });
+    expect(state.status).toBe("completed");
+    expect(seen[0]).toContain('top-level "chapters" array');
+    expect(seen[0]).toContain('"chapter-001"');
+    // Non-producing stages carry no note.
+    expect(seen[1] ?? "").not.toContain("Structured output contract");
+  });
+});

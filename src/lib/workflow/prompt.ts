@@ -16,6 +16,8 @@ export type PromptContext = {
   retryFeedback?: string[];
   /** Skill documents (path + content) injected into the contract. */
   skillDocs?: Array<{ path: string; content: string }>;
+  /** Hard structural requirements (e.g. foreach fan-out id arrays). */
+  contractNotes?: string[];
 };
 
 function section(title: string, items: string[]): string {
@@ -26,7 +28,7 @@ function section(title: string, items: string[]): string {
 /** Render the file-backed stage contract handed to a WorkerRuntime.
  *  The worker is a black box; this text IS the interface. */
 export function renderUnitPrompt(ctx: PromptContext): string {
-  const { stage, unitKey, retryFeedback, skillDocs } = ctx;
+  const { stage, unitKey, retryFeedback, skillDocs, contractNotes } = ctx;
   let prompt = `Stage: ${unitKey}\n`;
   if (stage.title) prompt += `Title: ${stage.title}\n`;
   prompt += `Owner: ${stage.owner}\n\n`;
@@ -35,6 +37,7 @@ export function renderUnitPrompt(ctx: PromptContext): string {
   prompt += section("Required outputs", stage.outputs);
   prompt += section("Tools you may reference", stage.tools);
   prompt += section("Harness tools granted for this stage", stage.allowed_tools ?? []);
+  prompt += section("Structured output contract (MUST be satisfied exactly)", contractNotes ?? []);
   prompt += section("Validators that will check your outputs", stage.validators);
   prompt += section(
     "External validator commands that will run after built-ins",
