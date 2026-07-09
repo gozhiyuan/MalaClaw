@@ -129,12 +129,46 @@ malaclaw dashboard
 
 The dashboard reads project manifests, lockfiles, telemetry, and starter
 metadata. It is useful for inspecting provisioned projects and active flow
-runs. The LongWrite tab reads a writing workspace, summarizes `longwrite.yaml`,
-the compiled `malaclaw.yaml`, runtime/model policy, review cadence, flow status,
-token/cost telemetry, command hints, recent worker logs, and dashboard-launched
-run output. It can start one LongWrite run per workspace, reject duplicate
-runs, edit the stable `longwrite.yaml` project/research/review fields through
-LongWrite's config validator, approve pending LongWrite gates, and generate
+runs. Product-specific tabs are dashboard extensions; LongWrite is bundled as
+the first alpha extension. The LongWrite extension reads a writing workspace,
+summarizes `longwrite.yaml`, the compiled `malaclaw.yaml`, runtime/model policy,
+review cadence, flow status, token/cost telemetry, command hints, recent worker
+logs, and dashboard-launched run output. It can start one LongWrite run per
+workspace, reject duplicate runs, edit the stable `longwrite.yaml`
+project/research/review fields through LongWrite's config validator, sync
+derived LongWrite files, approve pending LongWrite gates, and generate
 `reports/human-review-packet.md`, then links into the Flow monitor for deeper
-logs and events. Workflow structure and mode recompilation still stay in the
-LongWrite CLI/YAML path.
+logs and events. The LongWrite workflow graph panel visualizes compiled stages
+and can save advanced per-stage runtime/model/approval overrides to
+`malaclaw.yaml`; rerun `longwrite sync` to regenerate from the stable
+`longwrite.yaml` source of truth.
+
+Dashboard extension code is isolated from the core shell:
+
+```text
+dashboard/server/extensions/<id>/
+dashboard/src/extensions/<id>/
+```
+
+Core dashboard code consumes the generic extension registries and should not
+import downstream product routes or pages directly.
+
+For the LongWrite alpha extension, the React page source is owned by the
+LongWrite repo at:
+
+```text
+../longwrite-agent/dashboard-extension/client/
+```
+
+Server-side product routes are loaded from installed modules or filesystem
+paths:
+
+```bash
+export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/longwrite-agent/dashboard-extension/dist/server/index.js"
+malaclaw dashboard
+```
+
+The loaded module must export `createDashboardServerExtension(host)` or a
+default factory. The `host` object exposes the generic dashboard capabilities an
+extension is allowed to use: flow state, approvals, usage summaries, and log
+directory resolution.

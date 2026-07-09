@@ -4,7 +4,7 @@ import { runSubprocess } from "./subprocess.js";
 
 /** Deterministic-script worker: runs the stage's structured command
  *  (no shell interpolation) with the stage contract exposed via env vars.
- *  The workhorse for LongWrite research tooling stages. */
+ *  Use this for reproducible local tools, data preparation, and build steps. */
 export class ScriptRuntime implements WorkerRuntime {
   readonly id = "script";
 

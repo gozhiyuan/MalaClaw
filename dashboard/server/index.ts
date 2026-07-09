@@ -15,12 +15,15 @@ import starterRoutes from "./routes/starters.js";
 import manifestRoutes from "./routes/manifest.js";
 import diffRoutes from "./routes/diff.js";
 import flowRoutes from "./routes/flow.js";
-import longwriteRoutes from "./routes/longwrite.js";
+import { loadDashboardServerExtensions } from "./extensions/index.js";
 import { RuntimeStatusProvider } from "./services/runtime-status.js";
 import { createUsageRoutes } from "./routes/usage.js";
 import { MemoryWriter } from "./services/memory-writer.js";
 import { createMemoryRoutes } from "./routes/memory.js";
 import { createAuthHook } from "./middleware/auth.js";
+import { loadFlowState, logsDir } from "../../dist/lib/workflow/state.js";
+import { approveAllFlow, approveFlow } from "../../dist/lib/workflow/engine.js";
+import { summarizeUsage } from "../../dist/commands/flow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +38,7 @@ function asHttpError(error: unknown): HttpError {
 }
 
 export async function createServer(opts: { host?: string; port?: number; authToken?: string } = {}) {
-  const host = opts.host ?? "0.0.0.0";
+  const host = opts.host ?? "127.0.0.1";
   const port = opts.port ?? 3456;
   const isDev = process.env.NODE_ENV !== "production";
 
@@ -108,7 +111,16 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   await app.register(manifestRoutes);
   await app.register(diffRoutes);
   await app.register(flowRoutes);
-  await app.register(longwriteRoutes);
+  const dashboardServerExtensions = await loadDashboardServerExtensions({
+    loadFlowState,
+    logsDir,
+    approveAllFlow,
+    approveFlow,
+    summarizeUsage,
+  });
+  for (const extension of dashboardServerExtensions) {
+    await app.register(extension.routes);
+  }
   await app.register(createUsageRoutes(statusProvider));
 
   const memoryWriter = new MemoryWriter();

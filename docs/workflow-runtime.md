@@ -75,21 +75,45 @@ Use `malaclaw flow runtimes` before real runs.
 
 The axis that matters is not just cost — it is **single-shot vs agentic**.
 API/local runtimes send one prompt and write one response into one concrete
-output file. CLI harness runtimes read the workspace, write multiple files,
-and run tools.
+output file. `openai-compatible` / `openai-api` can also expose the stage's
+declared structured `command` as a single tool call, but the model cannot invent
+arbitrary commands. CLI harness runtimes read the workspace, write multiple
+files, and run broader tool/debug loops.
 
 | Stage shape | Use | Why |
 | --- | --- | --- |
 | Contract check, CI | `dry-run` | Free; validates workflow wiring only. |
 | Deterministic transform (retrieval, scoring, build helpers) | `script` | Reproducible, no model. |
-| One text artifact, low stakes (summaries, classification, review text) | `ollama` / `openai-compatible` | Cheapest real text; no tool harness. |
-| One text artifact, higher quality | `anthropic-api` / `gemini-api` / `openai-api` | Better hosted reasoning; still single-output, no tools. |
+| One text artifact, low stakes (summaries, classification, review text) | `ollama` / `openai-compatible` | Cheapest real text; optional declared-command tool for OpenAI-compatible servers. |
+| One text artifact, higher quality | `anthropic-api` / `gemini-api` / `openai-api` | Better hosted reasoning; still single-output. `openai-api` supports the declared-command tool path. |
 | Multi-file edits, shell tools, build/debug loops, skills/MCP | `claude-code` / `codex` | Expensive but the only runtimes with a real tool harness. |
 
 Rule of thumb: put agentic spend where judgment lives (outline, review,
 revision, build) and route everything else down-tier. Single-output runtimes
 return `tool_missing` if a stage declares more than one concrete output —
 that is the contract telling you the stage needs a harness runtime.
+
+## API Runtime Tool Boundary
+
+For `openai-compatible` and `openai-api`, a stage may declare a structured
+command:
+
+```yaml
+- id: summarize_search
+  owner: analyst
+  runtime: openai-api
+  outputs: [reports/search-summary.md]
+  command:
+    cmd: node
+    args: [tools/search.js]
+```
+
+The runtime exposes exactly one model tool, `run_declared_stage_command`. If the
+model calls it, MalaClaw runs only that configured `cmd` + `args` without shell
+interpolation, feeds the stdout/stderr back to the model, and writes the final
+model response into the one concrete output. Use `script` when the command
+itself should own the artifact; use `claude-code` or `codex` when the stage
+needs unconstrained multi-file tool work.
 
 ## Budget Approval Gates
 

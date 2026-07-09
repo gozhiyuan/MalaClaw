@@ -124,7 +124,7 @@ malaclaw flow run --runtime codex
 | `script` | Deterministic tools and data preparation | Runs structured `cmd` + `args`; no shell interpolation. |
 | `claude-code` | Real Claude Code headless work | Uses `claude -p`; model comes from stage `model:` or Claude CLI default. |
 | `codex` | Real Codex headless work | Uses `codex exec`; suitable for file-editing stages. |
-| `openai-compatible` | Cheap/local single-output text stages | Calls `/chat/completions`; writes one response into one concrete output. |
+| `openai-compatible` | Cheap/local single-output text stages | Calls `/chat/completions`; writes one response into one concrete output. Can expose one declared stage `command` as a tool. |
 | `openai-api` | Alias for hosted OpenAI-compatible use | Uses the same runtime implementation as `openai-compatible`. |
 | `ollama` | Free local single-output text stages | `openai-compatible` preset for `http://127.0.0.1:11434/v1`. |
 | `anthropic-api` | Hosted Claude single-output text stages | Anthropic Messages API; needs `ANTHROPIC_API_KEY`. |
@@ -232,16 +232,32 @@ malaclaw skill show <id>
 malaclaw dashboard
 ```
 
-The dashboard includes a Flow monitor for active workflow runs and a LongWrite
-tab for writing workspaces. The LongWrite tab reads `longwrite.yaml`, compiled
+The dashboard binds to `127.0.0.1` by default. Use `--host 0.0.0.0` only when
+you intentionally want LAN access, and pair it with `--auth-token <token>` when
+other machines can reach the port.
+
+The dashboard includes a Flow monitor for active workflow runs and supports
+product-specific extensions. LongWrite is bundled as the first alpha extension,
+not as a core dashboard dependency; its client source is owned by
+`longwrite-agent/dashboard-extension`. Its tab reads `longwrite.yaml`, compiled
 `malaclaw.yaml`, review cadence, runtime/model policy, current flow status,
 token/cost telemetry, command hints, recent worker logs, and dashboard-launched
 run output. It can start one LongWrite run per workspace, reject duplicate
 runs, edit the stable `longwrite.yaml` project/research/review fields through
-LongWrite's config validator, approve pending LongWrite gates, and generate
-`reports/human-review-packet.md`, then links into the Flow monitor for deeper
-logs and events. Workflow structure and mode recompilation still stay in the
-LongWrite CLI/YAML path.
+LongWrite's config validator, sync derived LongWrite files, approve pending
+LongWrite gates, and generate `reports/human-review-packet.md`, then links into
+the Flow monitor for deeper logs and events. The workflow graph panel visualizes
+compiled stages and can save advanced runtime/model/approval overrides directly
+to `malaclaw.yaml`; `longwrite sync` regenerates those overrides from
+`longwrite.yaml` when you want to return to the stable config path.
+
+Server-side dashboard extensions are loaded from installed modules or local
+files with `MALACLAW_DASHBOARD_SERVER_EXTENSIONS`:
+
+```bash
+export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/longwrite-agent/dashboard-extension/dist/server/index.js"
+malaclaw dashboard
+```
 
 ## Repository Layout
 

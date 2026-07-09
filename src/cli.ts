@@ -441,7 +441,7 @@ program
   .command("dashboard")
   .description("Start the web dashboard")
   .option("--port <port>", "Server port", "3456")
-  .option("--host <host>", "Bind host", "0.0.0.0")
+  .option("--host <host>", "Bind host", "127.0.0.1")
   .option("--auth-token <token>", "Bearer token for API authentication")
   .action(async (opts) => {
     const { runDashboard } = await import("./commands/dashboard.js");

@@ -3,6 +3,7 @@ import path from "node:path";
 import { resolveWithin } from "../safe-paths.js";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
 import { classifyCliFailure, collectProducedFiles } from "./classify.js";
+import { runSubprocess } from "./subprocess.js";
 
 export type OpenAICompatibleOptions = {
   id?: string;
@@ -12,12 +13,29 @@ export type OpenAICompatibleOptions = {
 };
 
 type ChatCompletionResponse = {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: {
+      role?: string;
+      content?: string | null;
+      tool_calls?: Array<{
+        id?: string;
+        type?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+  }>;
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
   };
+};
+
+type ChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  tool_call_id?: string;
+  tool_calls?: NonNullable<NonNullable<ChatCompletionResponse["choices"]>[number]["message"]>["tool_calls"];
 };
 
 function trimTrailingSlash(value: string): string {
@@ -38,6 +56,17 @@ function defaultModel(): string {
 
 function isConcrete(outputPath: string): boolean {
   return !outputPath.includes("*") && !outputPath.includes("{{");
+}
+
+function addUsage(
+  current: { input_tokens?: number; output_tokens?: number; total_tokens?: number },
+  usage: ChatCompletionResponse["usage"],
+): { input_tokens?: number; output_tokens?: number; total_tokens?: number } {
+  return {
+    input_tokens: (current.input_tokens ?? 0) + (usage?.prompt_tokens ?? 0) || undefined,
+    output_tokens: (current.output_tokens ?? 0) + (usage?.completion_tokens ?? 0) || undefined,
+    total_tokens: (current.total_tokens ?? 0) + (usage?.total_tokens ?? 0) || undefined,
+  };
 }
 
 /** Minimal OpenAI-compatible chat runtime for cheap/simple stages.
@@ -96,26 +125,42 @@ export class OpenAICompatibleRuntime implements WorkerRuntime {
       const headers: Record<string, string> = { "content-type": "application/json" };
       const apiKey = this.apiKey();
       if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-      const response = await fetch(`${this.baseUrl()}/chat/completions`, {
+      const messages: ChatMessage[] = [
+        {
+          role: "system",
+          content: req.command
+            ? "You are a headless writing worker. You may call run_declared_stage_command once for the stage-declared tool, then return only the artifact content for the requested output file."
+            : "You are a headless writing worker. Return only the artifact content for the requested output file.",
+        },
+        { role: "user", content: req.instructions },
+      ];
+      const tools = req.command ? [{
+        type: "function",
+        function: {
+          name: "run_declared_stage_command",
+          description: "Run the command explicitly declared by this workflow stage and return stdout/stderr.",
+          parameters: {
+            type: "object",
+            properties: {
+              reason: { type: "string", description: "Why the stage-declared command is needed." },
+            },
+            additionalProperties: false,
+          },
+        },
+      }] : undefined;
+
+      let response = await fetch(`${this.baseUrl()}/chat/completions`, {
         method: "POST",
         headers,
         signal: controller.signal,
-        body: JSON.stringify({
-          model: this.model(req),
-          messages: [
-            {
-              role: "system",
-              content: "You are a headless writing worker. Return only the artifact content for the requested output file.",
-            },
-            { role: "user", content: req.instructions },
-          ],
-        }),
+        body: JSON.stringify({ model: this.model(req), messages, ...(tools ? { tools, tool_choice: "auto" } : {}) }),
       });
-      const text = await response.text();
+      let text = await response.text();
       await fs.mkdir(path.dirname(logPath), { recursive: true });
-      await fs.writeFile(logPath, text, "utf-8");
+      const logChunks = [`# response 1\n${text}`];
 
       if (!response.ok) {
+        await fs.writeFile(logPath, logChunks.join("\n\n"), "utf-8");
         return {
           outcome: response.status === 429 ? "rate_limited" : classifyCliFailure(text),
           producedFiles: [],
@@ -128,9 +173,75 @@ export class OpenAICompatibleRuntime implements WorkerRuntime {
       try {
         parsed = JSON.parse(text) as ChatCompletionResponse;
       } catch {
+        await fs.writeFile(logPath, logChunks.join("\n\n"), "utf-8");
         return { outcome: "worker_error", producedFiles: [], message: "response was not JSON", logRef: logPath };
       }
-      const content = parsed.choices?.[0]?.message?.content;
+      let usage = addUsage({}, parsed.usage);
+      let content = parsed.choices?.[0]?.message?.content ?? undefined;
+      const toolCalls = parsed.choices?.[0]?.message?.tool_calls ?? [];
+      if (req.command && toolCalls.length > 0) {
+        messages.push({
+          role: "assistant",
+          content: parsed.choices?.[0]?.message?.content ?? null,
+          tool_calls: toolCalls,
+        });
+        for (const call of toolCalls) {
+          if (call.function?.name !== "run_declared_stage_command") continue;
+          const toolLogPath = `${logPath}.tool-${call.id ?? "declared"}.log`;
+          const toolResult = await runSubprocess({
+            bin: req.command.cmd,
+            args: req.command.args,
+            cwd: req.workspaceDir,
+            timeoutMs: Math.max(1_000, Math.min(req.timeoutMs, 120_000)),
+            logPath: toolLogPath,
+            env: {
+              MALACLAW_WORKSPACE: req.workspaceDir,
+              MALACLAW_UNIT_KEY: req.unitKey,
+              MALACLAW_STAGE_OUTPUTS: JSON.stringify(req.outputs),
+              ...(req.promptPath ? { MALACLAW_PROMPT_PATH: req.promptPath } : {}),
+              ...(req.model ? { MALACLAW_MODEL: req.model } : {}),
+            },
+          });
+          const toolContent = JSON.stringify({
+            code: toolResult.code,
+            timedOut: toolResult.timedOut,
+            spawnError: toolResult.spawnError,
+            output: toolResult.output.slice(-20_000),
+          });
+          logChunks.push(`# tool ${call.id ?? "declared"}\n${toolContent}`);
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id ?? "declared",
+            content: toolContent,
+          });
+        }
+        response = await fetch(`${this.baseUrl()}/chat/completions`, {
+          method: "POST",
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({ model: this.model(req), messages }),
+        });
+        text = await response.text();
+        logChunks.push(`# response 2\n${text}`);
+        if (!response.ok) {
+          await fs.writeFile(logPath, logChunks.join("\n\n"), "utf-8");
+          return {
+            outcome: response.status === 429 ? "rate_limited" : classifyCliFailure(text),
+            producedFiles: [],
+            message: text.slice(0, 500),
+            logRef: logPath,
+          };
+        }
+        try {
+          parsed = JSON.parse(text) as ChatCompletionResponse;
+        } catch {
+          await fs.writeFile(logPath, logChunks.join("\n\n"), "utf-8");
+          return { outcome: "worker_error", producedFiles: [], message: "tool follow-up response was not JSON", logRef: logPath };
+        }
+        usage = addUsage(usage, parsed.usage);
+        content = parsed.choices?.[0]?.message?.content ?? undefined;
+      }
+      await fs.writeFile(logPath, logChunks.join("\n\n"), "utf-8");
       if (!content) {
         return { outcome: "worker_error", producedFiles: [], message: "response did not include message content", logRef: logPath };
       }
@@ -142,10 +253,7 @@ export class OpenAICompatibleRuntime implements WorkerRuntime {
         outcome: "success",
         producedFiles: await collectProducedFiles(req.workspaceDir, concreteOutputs),
         logRef: logPath,
-        usage: {
-          input_tokens: parsed.usage?.prompt_tokens,
-          output_tokens: parsed.usage?.completion_tokens,
-        },
+        usage,
       };
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {

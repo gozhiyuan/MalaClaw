@@ -96,6 +96,51 @@ describe("OpenAICompatibleRuntime", () => {
     expect(result.outcome).toBe("rate_limited");
   });
 
+  it("lets the model call the stage-declared command before writing the output", async () => {
+    const ws = await makeWorkspace();
+    const toolScript = path.join(ws, "tool.js");
+    await fs.writeFile(toolScript, "console.log('tool data from declared command')", "utf-8");
+    const requests: Array<Record<string, unknown>> = [];
+    const baseUrl = await serve((_req, body) => {
+      const posted = JSON.parse(body) as Record<string, unknown>;
+      requests.push(posted);
+      if (requests.length === 1) {
+        return {
+          body: {
+            choices: [{
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: { name: "run_declared_stage_command", arguments: "{\"reason\":\"need data\"}" },
+                }],
+              },
+            }],
+            usage: { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 },
+          },
+        };
+      }
+      return {
+        body: {
+          choices: [{ message: { content: "# Draft\n\nUsed tool data." } }],
+          usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 },
+        },
+      };
+    });
+    const rt = new OpenAICompatibleRuntime({ baseUrl, model: "tool-test-model" });
+    const result = await rt.runStage(request(ws, {
+      command: { cmd: process.execPath, args: [toolScript] },
+    }));
+    expect(result.outcome).toBe("success");
+    expect(result.usage).toEqual({ input_tokens: 31, output_tokens: 8, total_tokens: 39 });
+    expect(requests[0].tools).toBeDefined();
+    const secondMessages = requests[1].messages as Array<{ role: string; content?: string }>;
+    expect(secondMessages.some((message) => message.role === "tool" && message.content?.includes("tool data"))).toBe(true);
+    expect(await fs.readFile(path.join(ws, "draft.md"), "utf-8")).toContain("Used tool data");
+  });
+
   it("reports local servers as available without an API key", async () => {
     const rt = new OpenAICompatibleRuntime({ baseUrl: "http://127.0.0.1:11434/v1" });
     const health = await rt.checkAvailable();

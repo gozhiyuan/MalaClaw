@@ -4,14 +4,14 @@ import { Projects } from "./pages/Projects";
 import { Starters } from "./pages/Starters";
 import { Config } from "./pages/Config";
 import { Flow } from "./pages/Flow";
-import { LongWrite } from "./pages/LongWrite";
+import { dashboardClientExtensions } from "./extensions";
 import { useWs } from "./hooks/useWs";
 
 export function App() {
   useWs();
   const tabs = [
     { to: "/", label: "Overview" },
-    { to: "/longwrite", label: "LongWrite" },
+    ...dashboardClientExtensions.map((extension) => ({ to: extension.path, label: extension.label })),
     { to: "/flow", label: "Flow" },
     { to: "/projects", label: "Projects" },
     { to: "/starters", label: "Starters" },
@@ -46,7 +46,9 @@ export function App() {
       <main style={{ padding: 12 }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/longwrite" element={<LongWrite />} />
+          {dashboardClientExtensions.map((extension) => (
+            <Route key={extension.id} path={extension.path} element={extension.element} />
+          ))}
           <Route path="/flow" element={<Flow />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/starters" element={<Starters />} />

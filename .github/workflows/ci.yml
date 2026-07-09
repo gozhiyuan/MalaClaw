@@ -36,3 +36,15 @@ jobs:
 
       - name: Validate templates
         run: node dist/cli.js validate
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Test dashboard
+        working-directory: dashboard
+        run: npm test
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: npm run build
