@@ -28,6 +28,7 @@ type ProjectConfig = YamlRecord & {
   version?: unknown;
   project?: YamlRecord;
   research?: YamlRecord;
+  writing?: YamlRecord;
   review?: YamlRecord;
 };
 
@@ -132,6 +133,47 @@ function runCommand(workspaceDir: string, runtime?: string): string {
 
 function approveCommand(workspaceDir: string, batchApprovals: boolean): string {
   return batchApprovals ? `longwrite approve ${shellQuote(workspaceDir)} --batch` : `longwrite status ${shellQuote(workspaceDir)}`;
+}
+
+function initArgs(body: {
+  dir?: string;
+  mode?: string;
+  topic?: string;
+  name?: string;
+  targetLengthWords?: number;
+  genre?: string;
+  audience?: string;
+  style?: string;
+  researchProvider?: string;
+  reviewCadence?: string;
+  reviewTime?: string;
+  reviewIntervalHours?: number;
+  batchApprovals?: boolean;
+  referenceLinks?: string[];
+  referenceFiles?: string[];
+}): { targetDir: string; args: string[] } {
+  const targetDir = requireDir(body.dir);
+  const args = ["init", targetDir];
+  const pairs: Array<[string, string | number | boolean | undefined]> = [
+    ["--mode", body.mode],
+    ["--topic", body.topic],
+    ["--name", body.name],
+    ["--target-length-words", body.targetLengthWords],
+    ["--genre", body.genre],
+    ["--audience", body.audience],
+    ["--style", body.style],
+    ["--research-provider", body.researchProvider],
+    ["--review-cadence", body.reviewCadence],
+    ["--review-time", body.reviewTime],
+    ["--review-interval-hours", body.reviewIntervalHours],
+  ];
+  for (const [flag, value] of pairs) {
+    if (value !== undefined && value !== "") args.push(flag, String(value));
+  }
+  if (body.batchApprovals) args.push("--batch-approvals");
+  for (const link of body.referenceLinks ?? []) if (link.trim()) args.push("--reference-link", link.trim());
+  for (const file of body.referenceFiles ?? []) if (file.trim()) args.push("--reference-file", file.trim());
+  return { targetDir, args };
 }
 
 async function recentLogs(workspaceDir: string): Promise<Array<{ name: string; content: string; truncated: boolean }>> {
@@ -247,6 +289,7 @@ const routes: FastifyPluginAsync = async (app) => {
     const manifest = await readYamlIfExists(path.join(workspaceDir, "malaclaw.yaml"));
     const project = asRecord(longwrite.project);
     const research = asRecord(longwrite.research);
+    const writing = asRecord(longwrite.writing);
     const review = asRecord(longwrite.review);
     const workflow = asRecord(manifest?.workflow);
     const stages = Array.isArray(workflow.stages) ? workflow.stages.map(asRecord).map(summarizeStage) : [];
@@ -279,6 +322,15 @@ const routes: FastifyPluginAsync = async (app) => {
         topic: asString(research.topic),
         provider: asString(research.provider),
       },
+      writing: {
+        targetLengthWords: asNumber(writing.target_length_words),
+        genre: asString(writing.genre),
+        audience: asString(writing.audience),
+        styleInstructions: asString(writing.style_instructions),
+        referenceLinks: asStringArray(writing.reference_links),
+        referenceFiles: asStringArray(writing.reference_files),
+        outputFormats: asStringArray(writing.output_formats),
+      },
       review: {
         cadence: asString(review.cadence) ?? "manual",
         time: asString(review.time),
@@ -301,8 +353,20 @@ const routes: FastifyPluginAsync = async (app) => {
         run: runCommand(workspaceDir, runtime),
         approve: approveCommand(workspaceDir, batchApprovals),
         packet: `longwrite report packet ${shellQuote(workspaceDir)}`,
+        feedback: `longwrite feedback add ${shellQuote(workspaceDir)} --message ${shellQuote("...")}`,
       },
     };
+  });
+
+  app.post("/api/longwrite/init", async (req, reply) => {
+    const body = (req.body ?? {}) as Parameters<typeof initArgs>[0];
+    try {
+      const { targetDir, args } = initArgs(body);
+      const result = await runLongWrite(args, path.dirname(targetDir));
+      return { ok: true, dir: targetDir, ...result };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.post("/api/longwrite/approve", async (req, reply) => {
@@ -322,6 +386,20 @@ const routes: FastifyPluginAsync = async (app) => {
     try {
       const result = await runLongWrite(["report", "packet", workspaceDir], workspaceDir);
       return { ok: true, ...result, artifact: "reports/human-review-packet.md" };
+    } catch (err) {
+      return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/longwrite/feedback", async (req, reply) => {
+    const { dir, message } = (req.body ?? {}) as { dir?: string; message?: string };
+    const workspaceDir = requireDir(dir);
+    if (typeof message !== "string" || message.trim().length === 0) {
+      return reply.status(400).send({ error: "message must be a non-empty string" });
+    }
+    try {
+      const result = await runLongWrite(["feedback", "add", workspaceDir, "--message", message], workspaceDir);
+      return { ok: true, artifact: "feedback/user-feedback.md", ...result };
     } catch (err) {
       return reply.status(500).send({ error: err instanceof Error ? err.message : String(err) });
     }

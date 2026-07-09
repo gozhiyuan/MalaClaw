@@ -31,10 +31,26 @@ beforeAll(async () => {
       "  process.exit(0);",
       "}",
       "const workspace = cmd === 'report' ? process.argv[4] : process.argv[3];",
+      "if (cmd === 'init') {",
+      "  const workspace = process.argv[3];",
+      "  fs.mkdirSync(workspace, { recursive: true });",
+      "  fs.writeFileSync(path.join(workspace, 'longwrite.yaml'), 'version: 1\\nproject:\\n  id: made\\n  artifact_type: novel\\n  mode: novel\\nresearch:\\n  provider: seed\\n  topic: Made\\nreview:\\n  cadence: manual\\n  time: \"08:00\"\\n  interval_hours: 4\\n  batch_approvals: false\\n');",
+      "  fs.writeFileSync(path.join(workspace, 'malaclaw.yaml'), 'version: 1\\nworkflow:\\n  stages: []\\n');",
+      "  console.log('created workspace ' + workspace);",
+      "  process.exit(0);",
+      "}",
       "if (cmd === 'report') {",
       "  fs.mkdirSync(path.join(workspace, 'reports'), { recursive: true });",
       "  fs.writeFileSync(path.join(workspace, 'reports', 'human-review-packet.md'), '# Packet\\n');",
       "  console.log('wrote packet');",
+      "  process.exit(0);",
+      "}",
+      "if (cmd === 'feedback') {",
+      "  const workspace = process.argv[4];",
+      "  const message = process.argv[6];",
+      "  fs.mkdirSync(path.join(workspace, 'feedback'), { recursive: true });",
+      "  fs.appendFileSync(path.join(workspace, 'feedback', 'user-feedback.md'), message + '\\n');",
+      "  console.log('feedback recorded');",
       "  process.exit(0);",
       "}",
       "if (cmd === 'run') {",
@@ -61,6 +77,15 @@ beforeAll(async () => {
     },
     research: { provider: "arxiv", topic: "Long-horizon agent memory" },
     review: { cadence: "daily", time: "08:00", interval_hours: 4, batch_approvals: true },
+    writing: {
+      target_length_words: 8000,
+      genre: "survey",
+      audience: "agent engineers",
+      style_instructions: "concise",
+      reference_links: ["https://example.test"],
+      reference_files: [],
+      output_formats: ["markdown"],
+    },
   }), "utf-8");
   await fs.writeFile(path.join(ws, "malaclaw.yaml"), stringifyYaml({
     version: 1,
@@ -115,6 +140,8 @@ describe("longwrite routes", () => {
     expect(body.project.name).toBe("Survey");
     expect(body.project.mode).toBe("auto_research_v2_lite");
     expect(body.research.topic).toBe("Long-horizon agent memory");
+    expect(body.writing.targetLengthWords).toBe(8000);
+    expect(body.writing.referenceLinks).toEqual(["https://example.test"]);
     expect(body.review.batchApprovals).toBe(true);
     expect(body.workflow.runtime).toBe("codex");
     expect(body.workflow.budgetUsd).toBe(5);
@@ -125,6 +152,33 @@ describe("longwrite routes", () => {
     expect(body.logs[0].content).toContain("outline worker log");
     expect(body.commands.run).toContain("--runtime 'codex'");
     expect(body.commands.packet).toContain("longwrite report packet");
+    expect(body.commands.feedback).toContain("longwrite feedback add");
+  });
+
+  it("POST /api/longwrite/init delegates workspace creation to the LongWrite CLI", async () => {
+    const dir = path.join(os.tmpdir(), `malaclaw-longwrite-created-${Date.now()}`);
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/longwrite/init",
+        payload: {
+          dir,
+          mode: "novel",
+          topic: "A city that externalizes memory",
+          targetLengthWords: 12000,
+          genre: "speculative mystery",
+          audience: "adult readers",
+          style: "quiet",
+          batchApprovals: true,
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().dir).toBe(dir);
+      expect(res.json().stdout).toContain("created workspace");
+      await fs.access(path.join(dir, "longwrite.yaml"));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("POST /api/longwrite/approve grants pending approvals", async () => {
@@ -146,6 +200,18 @@ describe("longwrite routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().stdout).toContain("wrote packet");
     expect(await fs.readFile(path.join(ws, "reports", "human-review-packet.md"), "utf-8")).toContain("Packet");
+  });
+
+  it("POST /api/longwrite/feedback appends user feedback through the LongWrite CLI", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/longwrite/feedback",
+      payload: { dir: ws, message: "Tighten chapter 2." },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().stdout).toContain("feedback recorded");
+    expect(await fs.readFile(path.join(ws, "feedback", "user-feedback.md"), "utf-8"))
+      .toContain("Tighten chapter 2.");
   });
 
   it("POST /api/longwrite/run starts one run per workspace and records output", async () => {

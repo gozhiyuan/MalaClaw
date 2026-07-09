@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -7,6 +8,15 @@ type LongWriteResponse = {
   config: ProjectConfig;
   project: { id?: string; name?: string; mode?: string; artifactType?: string };
   research: { topic?: string; provider?: string };
+  writing: {
+    targetLengthWords?: number;
+    genre?: string;
+    audience?: string;
+    styleInstructions?: string;
+    referenceLinks: string[];
+    referenceFiles: string[];
+    outputFormats: string[];
+  };
   review: { cadence: string; time?: string; intervalHours?: number; batchApprovals: boolean };
   workflow: {
     runtime?: string;
@@ -46,7 +56,7 @@ type LongWriteResponse = {
     stdout: string;
     stderr: string;
   } | null;
-  commands: { status: string; run: string; approve: string; packet: string };
+  commands: { status: string; run: string; approve: string; packet: string; feedback: string };
 };
 
 type ProjectConfig = {
@@ -61,12 +71,39 @@ type ProjectConfig = {
     provider?: string;
     topic?: string;
   };
+  writing?: {
+    target_length_words?: number;
+    genre?: string;
+    audience?: string;
+    style_instructions?: string;
+    reference_links?: string[];
+    reference_files?: string[];
+    output_formats?: Array<"markdown" | "pdf">;
+  };
   review?: {
     cadence?: "manual" | "daily" | "interval";
     time?: string;
     interval_hours?: number;
     batch_approvals?: boolean;
   };
+};
+
+type InitDraft = {
+  dir: string;
+  mode: "auto_research_v2_lite" | "novel" | "technical_book";
+  topic: string;
+  name: string;
+  researchProvider: string;
+  targetLengthWords: string;
+  genre: string;
+  audience: string;
+  style: string;
+  referenceLinks: string;
+  referenceFiles: string;
+  reviewCadence: "manual" | "daily" | "interval";
+  reviewTime: string;
+  reviewIntervalHours: string;
+  batchApprovals: boolean;
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -138,6 +175,24 @@ export function LongWrite() {
   const [operationMessage, setOperationMessage] = useState<string | null>(null);
   const [runtimeOverride, setRuntimeOverride] = useState("");
   const [draftConfig, setDraftConfig] = useState<ProjectConfig | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [initDraft, setInitDraft] = useState<InitDraft>({
+    dir: "",
+    mode: "auto_research_v2_lite",
+    topic: "",
+    name: "",
+    researchProvider: "seed",
+    targetLengthWords: "",
+    genre: "",
+    audience: "",
+    style: "",
+    referenceLinks: "",
+    referenceFiles: "",
+    reviewCadence: "manual",
+    reviewTime: "08:00",
+    reviewIntervalHours: "4",
+    batchApprovals: false,
+  });
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useLongWrite(dir);
 
@@ -184,6 +239,47 @@ export function LongWrite() {
     onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
   });
 
+  const addFeedback = useMutation({
+    mutationFn: (message: string) =>
+      postJson<{ ok: boolean; artifact: string }>("/api/longwrite/feedback", { dir, message }),
+    onSuccess: (result) => {
+      setOperationMessage(`Recorded feedback in ${result.artifact}.`);
+      setFeedbackText("");
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
+  const createWorkspace = useMutation({
+    mutationFn: (draft: InitDraft) =>
+      postJson<{ ok: boolean; dir: string; stdout?: string }>("/api/longwrite/init", {
+        dir: draft.dir,
+        mode: draft.mode,
+        topic: draft.topic,
+        name: draft.name || undefined,
+        researchProvider: draft.researchProvider || undefined,
+        targetLengthWords: draft.targetLengthWords ? Number(draft.targetLengthWords) : undefined,
+        genre: draft.genre || undefined,
+        audience: draft.audience || undefined,
+        style: draft.style || undefined,
+        referenceLinks: draft.referenceLinks.split("\n").map((v) => v.trim()).filter(Boolean),
+        referenceFiles: draft.referenceFiles.split("\n").map((v) => v.trim()).filter(Boolean),
+        reviewCadence: draft.reviewCadence,
+        reviewTime: draft.reviewTime,
+        reviewIntervalHours: draft.reviewIntervalHours ? Number(draft.reviewIntervalHours) : undefined,
+        batchApprovals: draft.batchApprovals,
+      }),
+    onSuccess: (result) => {
+      setOperationMessage(`Created LongWrite workspace at ${result.dir}.`);
+      localStorage.setItem("longwrite-dir", result.dir);
+      localStorage.setItem("malaclaw-flow-dir", result.dir);
+      setInput(result.dir);
+      setDir(result.dir);
+      queryClient.invalidateQueries({ queryKey: ["longwrite", result.dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
   const load = () => {
     localStorage.setItem("longwrite-dir", input);
     localStorage.setItem("malaclaw-flow-dir", input);
@@ -201,6 +297,20 @@ export function LongWrite() {
 
   const patchConfig = (patch: (current: ProjectConfig) => ProjectConfig) => {
     setDraftConfig((current) => current ? patch(current) : current);
+  };
+
+  const patchInit = (patch: Partial<InitDraft>) => setInitDraft((current) => ({ ...current, ...patch }));
+
+  const inputStyle: CSSProperties = {
+    display: "block",
+    width: "100%",
+    boxSizing: "border-box",
+    marginTop: 4,
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid #30363d",
+    background: "#0d1117",
+    color: "#c9d1d9",
   };
 
   return (
@@ -237,6 +347,103 @@ export function LongWrite() {
       {error != null && <div style={{ color: "#f85149" }}>Error: {String(error)}</div>}
       {operationMessage && <div style={{ color: operationMessage.includes("failed") || operationMessage.includes("not found") ? "#f85149" : "#8b949e" }}>{operationMessage}</div>}
 
+      <Section title="Create Workspace">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Directory
+            <input value={initDraft.dir} onChange={(e) => patchInit({ dir: e.target.value })} placeholder="/absolute/path/to/new-workspace" style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Mode
+            <select value={initDraft.mode} onChange={(e) => patchInit({ mode: e.target.value as InitDraft["mode"] })} style={inputStyle}>
+              <option value="auto_research_v2_lite">auto_research_v2_lite</option>
+              <option value="novel">novel</option>
+              <option value="technical_book">technical_book</option>
+            </select>
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Topic / premise
+            <input value={initDraft.topic} onChange={(e) => patchInit({ topic: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Name
+            <input value={initDraft.name} onChange={(e) => patchInit({ name: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Target words
+            <input type="number" min={1} value={initDraft.targetLengthWords} onChange={(e) => patchInit({ targetLengthWords: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Genre / category
+            <input value={initDraft.genre} onChange={(e) => patchInit({ genre: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Audience
+            <input value={initDraft.audience} onChange={(e) => patchInit({ audience: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Research provider
+            <select value={initDraft.researchProvider} onChange={(e) => patchInit({ researchProvider: e.target.value })} style={inputStyle}>
+              <option value="seed">seed</option>
+              <option value="arxiv">arxiv</option>
+              <option value="semantic_scholar">semantic_scholar</option>
+              <option value="dblp">dblp</option>
+              <option value="crossref">crossref</option>
+              <option value="multi">multi</option>
+            </select>
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Review cadence
+            <select value={initDraft.reviewCadence} onChange={(e) => patchInit({ reviewCadence: e.target.value as InitDraft["reviewCadence"] })} style={inputStyle}>
+              <option value="manual">manual</option>
+              <option value="daily">daily</option>
+              <option value="interval">interval</option>
+            </select>
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Review time
+            <input value={initDraft.reviewTime} onChange={(e) => patchInit({ reviewTime: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Interval hours
+            <input type="number" min={1} value={initDraft.reviewIntervalHours} onChange={(e) => patchInit({ reviewIntervalHours: e.target.value })} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12, display: "flex", gap: 8, alignItems: "center", marginTop: 20 }}>
+            <input type="checkbox" checked={initDraft.batchApprovals} onChange={(e) => patchInit({ batchApprovals: e.target.checked })} />
+            Batch approvals
+          </label>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginTop: 10 }}>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Style instructions
+            <textarea value={initDraft.style} onChange={(e) => patchInit({ style: e.target.value })} rows={3} style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Reference links
+            <textarea value={initDraft.referenceLinks} onChange={(e) => patchInit({ referenceLinks: e.target.value })} rows={3} placeholder="One URL per line" style={inputStyle} />
+          </label>
+          <label style={{ color: "#8b949e", fontSize: 12 }}>
+            Reference files
+            <textarea value={initDraft.referenceFiles} onChange={(e) => patchInit({ referenceFiles: e.target.value })} rows={3} placeholder="One local path per line" style={inputStyle} />
+          </label>
+        </div>
+        <button
+          onClick={() => createWorkspace.mutate(initDraft)}
+          disabled={createWorkspace.isPending}
+          style={{
+            marginTop: 10,
+            padding: "6px 12px",
+            borderRadius: 6,
+            border: "1px solid #30363d",
+            background: "#238636",
+            color: "#fff",
+            cursor: createWorkspace.isPending ? "wait" : "pointer",
+          }}
+        >
+          Create workspace
+        </button>
+      </Section>
+
       {data && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
@@ -247,6 +454,8 @@ export function LongWrite() {
                 <div>{smallLabel("artifact")} {data.project.artifactType ?? "unknown"}</div>
                 <div>{smallLabel("topic")} {data.research.topic ?? "not set"}</div>
                 <div>{smallLabel("provider")} {data.research.provider ?? "not set"}</div>
+                <div>{smallLabel("audience")} {data.writing.audience ?? "not set"}</div>
+                <div>{smallLabel("style")} {data.writing.styleInstructions ?? "not set"}</div>
               </div>
             </Section>
 
@@ -391,6 +600,39 @@ export function LongWrite() {
             )}
           </Section>
 
+          <Section title="Feedback">
+            <textarea
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              rows={4}
+              placeholder="Add feedback for the next revision loop."
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 10,
+                borderRadius: 6,
+                border: "1px solid #30363d",
+                background: "#0d1117",
+                color: "#c9d1d9",
+              }}
+            />
+            <button
+              onClick={() => addFeedback.mutate(feedbackText)}
+              disabled={addFeedback.isPending || feedbackText.trim().length === 0}
+              style={{
+                marginTop: 8,
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #30363d",
+                background: feedbackText.trim().length ? "#1f6feb" : "#21262d",
+                color: "#fff",
+                cursor: feedbackText.trim().length ? "pointer" : "not-allowed",
+              }}
+            >
+              Save feedback
+            </button>
+          </Section>
+
           {draftConfig && (
             <Section title="Config">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
@@ -433,6 +675,47 @@ export function LongWrite() {
                     <option value="arxiv">arxiv</option>
                     <option value="semantic_scholar">semantic_scholar</option>
                   </select>
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Target words
+                  <input
+                    type="number"
+                    min={1}
+                    value={draftConfig.writing?.target_length_words ?? ""}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: {
+                        reference_links: [],
+                        reference_files: [],
+                        output_formats: ["markdown"],
+                        ...c.writing,
+                        target_length_words: e.target.value ? Number(e.target.value) : undefined,
+                      },
+                    }))}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Genre / category
+                  <input
+                    value={draftConfig.writing?.genre ?? ""}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: { reference_links: [], reference_files: [], output_formats: ["markdown"], ...c.writing, genre: e.target.value || undefined },
+                    }))}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Audience
+                  <input
+                    value={draftConfig.writing?.audience ?? ""}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: { reference_links: [], reference_files: [], output_formats: ["markdown"], ...c.writing, audience: e.target.value || undefined },
+                    }))}
+                    style={inputStyle}
+                  />
                 </label>
                 <label style={{ color: "#8b949e", fontSize: 12 }}>
                   Review cadence
@@ -491,6 +774,54 @@ export function LongWrite() {
                   Batch approvals
                 </label>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginTop: 10 }}>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Style instructions
+                  <textarea
+                    value={draftConfig.writing?.style_instructions ?? ""}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: { reference_links: [], reference_files: [], output_formats: ["markdown"], ...c.writing, style_instructions: e.target.value || undefined },
+                    }))}
+                    rows={3}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Reference links
+                  <textarea
+                    value={(draftConfig.writing?.reference_links ?? []).join("\n")}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: {
+                        reference_files: [],
+                        output_formats: ["markdown"],
+                        ...c.writing,
+                        reference_links: e.target.value.split("\n").map((v) => v.trim()).filter(Boolean),
+                      },
+                    }))}
+                    rows={3}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ color: "#8b949e", fontSize: 12 }}>
+                  Reference files
+                  <textarea
+                    value={(draftConfig.writing?.reference_files ?? []).join("\n")}
+                    onChange={(e) => patchConfig((c) => ({
+                      ...c,
+                      writing: {
+                        reference_links: [],
+                        output_formats: ["markdown"],
+                        ...c.writing,
+                        reference_files: e.target.value.split("\n").map((v) => v.trim()).filter(Boolean),
+                      },
+                    }))}
+                    rows={3}
+                    style={inputStyle}
+                  />
+                </label>
+              </div>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                 <button
                   onClick={() => saveConfig.mutate(draftConfig)}
@@ -530,6 +861,7 @@ export function LongWrite() {
               <Command value={data.commands.run} />
               <Command value={data.commands.approve} />
               <Command value={data.commands.packet} />
+              <Command value={data.commands.feedback} />
             </div>
           </Section>
 
