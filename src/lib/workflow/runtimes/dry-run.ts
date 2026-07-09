@@ -3,6 +3,7 @@ import path from "node:path";
 import type { StageRunOutcome } from "../../schema.js";
 import { resolveWithin } from "../safe-paths.js";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
+import { CLI_HARNESS_CAPABILITIES } from "./base.js";
 
 export type DryRunOptions = {
   /** Exact content for specific output paths. */
@@ -28,6 +29,9 @@ async function readIfExists(filePath: string): Promise<string | null> {
  *  calls a model. */
 export class DryRunRuntime implements WorkerRuntime {
   readonly id = "dry-run";
+  // A simulator accepts every contract: workflows written for harness
+  // runtimes must stay dry-runnable in CI.
+  readonly capabilities = CLI_HARNESS_CAPABILITIES;
   private readonly fixtures: Record<string, string>;
   private readonly outcomes: Record<string, StageRunOutcome[]>;
 

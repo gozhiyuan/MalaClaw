@@ -79,6 +79,10 @@ export async function runFlowRuntimes(opts: { runtime?: string }): Promise<void>
     console.log(`  headless: ${health.supports_headless ? "yes" : "no"}`);
     console.log(`  max_concurrent: ${health.max_concurrent ?? "unknown"}`);
     console.log(`  isolated_workspace: ${health.requires_isolated_workspace ? "required" : "no"}`);
+    const caps = Object.entries(runtime.capabilities)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name);
+    console.log(`  capabilities: ${caps.join(", ") || "none"}`);
     if (health.detail) console.log(`  detail: ${health.detail}`);
   }
 }

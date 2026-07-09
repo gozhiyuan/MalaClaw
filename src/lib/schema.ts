@@ -312,7 +312,13 @@ const workUnitFields = {
   // check (future milestone) and from input-provenance warnings.
   optional_inputs: z.array(workspacePath).default([]),
   outputs: z.array(workspacePath).default([]),
+  // Advisory tool names mentioned in the stage prompt (any runtime).
   tools: z.array(z.string()).default([]),
+  // Harness tool grants: maps to claude-code --allowedTools. Requires a
+  // runtime with the cli_harness_tools capability.
+  allowed_tools: z.array(z.string().min(1)).default([]),
+  // Workspace-relative skill documents injected into the stage prompt.
+  skills: z.array(workspacePath).default([]),
   validators: z.array(z.string()).default([]),
   validator_commands: z.array(WorkflowCommand).default([]),
   requires_human_approval: z.boolean().default(false),

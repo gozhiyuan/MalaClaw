@@ -55,6 +55,8 @@ export type WorkUnitSpec = {
   optional_inputs: string[];
   outputs: string[];
   tools: string[];
+  allowed_tools: string[];
+  skills: string[];
   validators: string[];
   validator_commands: WorkflowCommand[];
   requires_human_approval?: boolean;
@@ -91,6 +93,61 @@ function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undef
   if (spec.model) return spec.model;
   if (spec.model_tier) return workflow.model_tiers?.[spec.model_tier]?.model;
   return undefined;
+}
+
+/** Capability requirements a unit's declaration implies. */
+function unitCapabilityFindings(
+  spec: WorkUnitSpec,
+  workflow: WorkflowDef,
+  fallbackRuntimeId: string,
+): string[] {
+  const runtimeId = resolveRuntimeId(spec, workflow, fallbackRuntimeId);
+  let capabilities;
+  try {
+    capabilities = getWorkerRuntime(runtimeId).capabilities;
+  } catch {
+    return [`${spec.key}: unknown runtime "${runtimeId}"`];
+  }
+  const findings: string[] = [];
+  const nonGlob = spec.outputs.filter((o) => !o.includes("*"));
+  const needsMultiFile = nonGlob.length > 1 || spec.outputs.some((o) => o.includes("*"));
+  if (needsMultiFile && !capabilities.multi_file_edit) {
+    findings.push(
+      `${spec.key}: declares ${spec.outputs.length} outputs but runtime "${runtimeId}" is single-output — use claude-code, codex, or script`,
+    );
+  }
+  if (spec.allowed_tools.length > 0 && !capabilities.cli_harness_tools) {
+    findings.push(
+      `${spec.key}: allowed_tools requires a CLI harness runtime (claude-code, codex); "${runtimeId}" has no harness tools`,
+    );
+  }
+  if (spec.command && !capabilities.declared_command_tool) {
+    findings.push(
+      `${spec.key}: declares command but runtime "${runtimeId}" cannot run declared commands`,
+    );
+  }
+  return findings;
+}
+
+/** Pre-execution check: every unit's declared needs vs its resolved runtime's
+ *  capabilities. Returns human-readable mismatches; empty means safe to run. */
+export function findCapabilityMismatches(workflow: WorkflowDef, fallbackRuntimeId: string): string[] {
+  const findings: string[] = [];
+  const visit = (stage: WorkflowStage): void => {
+    if ("stages" in stage) {
+      for (const child of stage.stages) visit(child);
+      return;
+    }
+    if ("steps" in stage) {
+      for (const step of stage.steps) {
+        findings.push(...unitCapabilityFindings(stepToSpec(stage, step, "item"), workflow, fallbackRuntimeId));
+      }
+      return;
+    }
+    findings.push(...unitCapabilityFindings(stageToSpec(stage), workflow, fallbackRuntimeId));
+  };
+  for (const stage of workflow.stages) visit(stage);
+  return findings;
 }
 
 /** True when any unit of this stage resolves to a model tier marked
@@ -193,7 +250,18 @@ async function runUnit(
       requestedRuntime: requestedRuntimeId, actualRuntime: unitRuntime.id,
     });
 
-    const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback });
+    const skillDocs: Array<{ path: string; content: string }> = [];
+    for (const skillPath of spec.skills) {
+      try {
+        skillDocs.push({
+          path: skillPath,
+          content: await fs.readFile(resolveWithin(workspaceDir, skillPath), "utf-8"),
+        });
+      } catch {
+        skillDocs.push({ path: skillPath, content: "(skill document missing from workspace)" });
+      }
+    }
+    const prompt = renderUnitPrompt({ stage: spec, unitKey, retryFeedback, skillDocs });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
     // Revision rounds reset the attempt counter, so tag the round to keep
     // round 2 from overwriting round 1's prompt and log.
@@ -209,6 +277,7 @@ async function runUnit(
       workspaceDir, unitKey,
       outputs: spec.outputs, timeoutMs: 600_000,
       command: spec.command,
+      allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
       model: resolveModel(spec, workflow), promptPath, logPath,
     });
 
@@ -228,6 +297,7 @@ async function runUnit(
         workspaceDir, unitKey, owner: spec.owner, instructions: prompt,
         outputs: spec.outputs, timeoutMs: 600_000,
         command: spec.command,
+      allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
         model: resolveModel(spec, workflow), promptPath, logPath,
       });
     }
@@ -336,6 +406,8 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     optional_inputs: stage.optional_inputs,
     outputs: stage.outputs,
     tools: stage.tools,
+    allowed_tools: stage.allowed_tools,
+    skills: stage.skills,
     validators: stage.validators,
     validator_commands: stage.validator_commands,
     requires_human_approval: stage.requires_human_approval,
@@ -360,6 +432,8 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     optional_inputs: step.optional_inputs.map(mapPath),
     outputs: step.outputs.map(mapPath),
     tools: step.tools,
+    allowed_tools: step.allowed_tools,
+    skills: step.skills,
     validators: step.validators,
     validator_commands: step.validator_commands,
     requires_human_approval: step.requires_human_approval,
@@ -665,6 +739,14 @@ async function runLoopStage(
 
 export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
   const { workflow, workspaceDir } = opts;
+
+  const mismatches = findCapabilityMismatches(workflow, opts.runtime.id);
+  if (mismatches.length > 0) {
+    throw new Error(
+      "Stage/runtime capability mismatches (fix the manifest or pick another --runtime):\n" +
+      mismatches.map((m) => `  - ${m}`).join("\n"),
+    );
+  }
 
   let state = await loadFlowState(workspaceDir);
   if (state && state.workflowHash !== workflowHash(workflow)) {

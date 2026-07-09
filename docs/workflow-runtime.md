@@ -71,6 +71,44 @@ runtime only runs one unit headlessly.
 
 Use `malaclaw flow runtimes` before real runs.
 
+## Runtime Capabilities
+
+Every worker runtime declares what it can do; `malaclaw flow runtimes`
+prints these, and `flow run` validates every stage against its resolved
+runtime **before executing anything** — a mismatch fails fast with the full
+list instead of dying mid-run.
+
+| Capability | Meaning |
+| --- | --- |
+| `single_output` | Writes one model response into one concrete output file. |
+| `multi_file_edit` | Reads the workspace, writes multiple declared outputs. |
+| `declared_command_tool` | Can invoke the stage-declared `command:` as a tool. |
+| `provider_tool_calling` | Provider-native tool/function calling. |
+| `cli_harness_tools` | Full CLI harness: shell/file tools, skills, MCP. |
+
+Alpha matrix: `claude-code`/`codex` are full harnesses; `openai-api`,
+`openai-compatible`, and `anthropic-api` are single-output with the
+declared-command tool; `gemini-api` and `ollama` are single-output only;
+`script` is deterministic; `dry-run` simulates every contract so any
+workflow stays CI-runnable. The runtimes are deliberately not equivalent.
+
+## Stage Tools and Skills
+
+```yaml
+- id: fact_check
+  owner: skeptical-reviewer
+  outputs: [reviews/fact-check.md]
+  tools: [web_search]              # advisory: named in the prompt
+  allowed_tools: [Bash, WebSearch] # harness grant: claude-code --allowedTools
+  skills:                          # workspace docs injected into the prompt
+    - skills/citation-style.md
+```
+
+`allowed_tools` is additive to the safe defaults (Read/Write/Edit/Glob/Grep)
+and requires a `cli_harness_tools` runtime — granting Bash is a per-stage,
+reviewable decision, never a default. `skills` files are read from the
+workspace and inlined into the stage contract for every runtime.
+
 ## Choosing a Worker Runtime
 
 The axis that matters is not just cost — it is **single-shot vs agentic**.

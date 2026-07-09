@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
+import { DETERMINISTIC_CAPABILITIES } from "./base.js";
 import { runSubprocess } from "./subprocess.js";
 
 /** Deterministic-script worker: runs the stage's structured command
@@ -7,6 +8,7 @@ import { runSubprocess } from "./subprocess.js";
  *  Use this for reproducible local tools, data preparation, and build steps. */
 export class ScriptRuntime implements WorkerRuntime {
   readonly id = "script";
+  readonly capabilities = DETERMINISTIC_CAPABILITIES;
 
   async checkAvailable(): Promise<RuntimeHealth> {
     return { available: true, supports_headless: true, max_concurrent: 2 };

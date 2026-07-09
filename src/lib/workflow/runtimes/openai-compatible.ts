@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveWithin } from "../safe-paths.js";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
+import { SINGLE_OUTPUT_API_CAPABILITIES } from "./base.js";
 import { classifyCliFailure, collectProducedFiles } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
 
@@ -74,6 +75,7 @@ function addUsage(
  *  concrete output file. Use codex/claude-code for multi-file edits. */
 export class OpenAICompatibleRuntime implements WorkerRuntime {
   readonly id: string;
+  readonly capabilities = { ...SINGLE_OUTPUT_API_CAPABILITIES, declared_command_tool: true, provider_tool_calling: true };
   private readonly options: OpenAICompatibleOptions;
 
   constructor(options: OpenAICompatibleOptions = {}) {

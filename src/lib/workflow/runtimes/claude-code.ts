@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
+import { CLI_HARNESS_CAPABILITIES } from "./base.js";
 import { classifyCliFailure, collectProducedFiles } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
 
@@ -26,6 +27,7 @@ const DEFAULT_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"];
  *  adjust via options if the CLI changes. */
 export class ClaudeCodeRuntime implements WorkerRuntime {
   readonly id = "claude-code";
+  readonly capabilities = CLI_HARNESS_CAPABILITIES;
   private readonly options: ClaudeCodeOptions;
 
   constructor(options: ClaudeCodeOptions = {}) {
@@ -57,7 +59,12 @@ export class ClaudeCodeRuntime implements WorkerRuntime {
   async runStage(req: StageRunRequest): Promise<StageRunResult> {
     const logPath =
       req.logPath ?? path.join(req.workspaceDir, ".malaclaw", "flow", "logs", `${req.unitKey}.log`);
-    const allowed = (this.options.allowedTools ?? DEFAULT_ALLOWED_TOOLS).join(",");
+    // Stage grants are additive to the safe defaults (or options override).
+    // Bash and other powerful tools stay opt-in per stage, never default.
+    const allowed = [...new Set([
+      ...(this.options.allowedTools ?? DEFAULT_ALLOWED_TOOLS),
+      ...(req.allowedTools ?? []),
+    ])].join(",");
     const args = this.options.argsOverride ?? [
       "-p",
       "--output-format", "json",

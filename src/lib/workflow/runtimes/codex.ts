@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
+import { CLI_HARNESS_CAPABILITIES } from "./base.js";
 import { classifyCliFailure, collectProducedFiles } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
 
@@ -37,6 +38,7 @@ export function parseCodexTokensUsed(output: string): number | undefined {
  *  current as of 2026-07 — adjust via options if the CLI changes. */
 export class CodexRuntime implements WorkerRuntime {
   readonly id = "codex";
+  readonly capabilities = CLI_HARNESS_CAPABILITIES;
   private readonly options: CodexOptions;
 
   constructor(options: CodexOptions = {}) {
