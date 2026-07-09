@@ -448,6 +448,26 @@ program
     await runDashboard({ port: parseInt(opts.port), host: opts.host, authToken: opts.authToken });
   });
 
+const dashboardExtensions = program
+  .command("dashboard-extensions")
+  .description("Inspect dashboard server extensions (env + ~/.malaclaw/dashboard.yaml)");
+
+dashboardExtensions
+  .command("list")
+  .description("List configured dashboard server extensions and their sources")
+  .action(async () => {
+    const { runDashboardExtensionsList } = await import("./commands/dashboard.js");
+    await runDashboardExtensionsList();
+  });
+
+dashboardExtensions
+  .command("doctor")
+  .description("Try loading each configured extension and report problems")
+  .action(async () => {
+    const { runDashboardExtensionsDoctor } = await import("./commands/dashboard.js");
+    await runDashboardExtensionsDoctor();
+  });
+
 program.parseAsync(process.argv).catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
