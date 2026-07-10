@@ -26,6 +26,7 @@ import { evaluateStopCondition } from "./stop-condition.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
 import { getWorkerRuntime } from "./runtimes/registry.js";
+import { acquireFlowLock, releaseFlowLock } from "./lock.js";
 import type { StageRunResult, WorkerRuntime } from "./runtimes/base.js";
 
 export type RunFlowOptions = {
@@ -36,6 +37,8 @@ export type RunFlowOptions = {
   reset?: boolean;
   /** Backoff between rate-limited retries (tests use 0). */
   backoffMs?: number;
+  /** Label recorded in the workspace lock (cli/dashboard/supervisor). */
+  lockHolder?: string;
 };
 
 const MAX_BACKOFFS = 5;
@@ -432,6 +435,36 @@ async function runUnit(
     }
 
     unit.lastOutcome = result.outcome;
+
+    // Explicit quota fallback: only when the policy declares try_fallback
+    // AND a fallback runtime is listed AND it is capability-compatible with
+    // this unit. Never silent — recorded in state and events. Anything else
+    // pauses exactly as before.
+    if (result.outcome === "quota_exhausted" && workflow.runtime_policy?.on_quota_exhausted === "try_fallback") {
+      const fallbackId = (workflow.runtime_policy.fallback ?? []).find((candidate) => {
+        if (candidate === unitRuntime.id) return false;
+        return unitCapabilityFindings({ ...spec, runtime: candidate }, workflow, candidate).length === 0;
+      });
+      if (fallbackId) {
+        const fallbackRuntime = getWorkerRuntime(fallbackId);
+        await appendEvent(workspaceDir, {
+          type: "runtime_fallback", key: unitKey,
+          from: unitRuntime.id, to: fallbackId, reason: "quota_exhausted",
+        });
+        unit.actualRuntime = fallbackId;
+        const fallbackStartedAt = Date.now();
+        result = await fallbackRuntime.runStage({
+          owner: spec.owner, instructions: prompt,
+          workspaceDir, unitKey,
+          outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
+          command: spec.command,
+          allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
+          model: resolveModel(spec, workflow), promptPath, logPath,
+        });
+        recordAttemptTelemetry(state, result, fallbackStartedAt);
+        unit.lastOutcome = result.outcome;
+      }
+    }
 
     if (PAUSE_OUTCOMES.has(result.outcome)) {
       unit.status = "pending"; // re-runnable once the blocker clears
@@ -866,7 +899,17 @@ async function runLoopStage(
   return "succeeded";
 }
 
+/** One flow run per workspace: acquire the shared lock for the duration. */
 export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
+  await acquireFlowLock(opts.workspaceDir, opts.lockHolder ?? "cli");
+  try {
+    return await runFlowUnlocked(opts);
+  } finally {
+    await releaseFlowLock(opts.workspaceDir);
+  }
+}
+
+async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> {
   const { workflow, workspaceDir } = opts;
 
   const mismatches = findCapabilityMismatches(workflow, opts.runtime.id);

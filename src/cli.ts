@@ -397,6 +397,23 @@ flow
   });
 
 flow
+  .command("supervise")
+  .description("Keep retrying a resumable flow: backoff on blockers, poll on approvals (never auto-approves). Foreground; use nohup/tmux to detach.")
+  .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")
+  .option("--retry-minutes <n>", "Base delay before retrying a blocked flow", "5")
+  .option("--max-retry-minutes <n>", "Backoff cap", "60")
+  .option("--max-hours <n>", "Supervision deadline; the flow stays paused after it", "168")
+  .action(async (opts) => {
+    const { runFlowSupervise } = await import("./commands/flow.js");
+    await runFlowSupervise({
+      runtime: opts.runtime,
+      retryMinutes: Number(opts.retryMinutes),
+      maxRetryMinutes: Number(opts.maxRetryMinutes),
+      maxHours: Number(opts.maxHours),
+    });
+  });
+
+flow
   .command("runtimes")
   .description("Check worker runtime availability")
   .option("--runtime <id>", "Only check one runtime")

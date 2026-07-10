@@ -74,16 +74,30 @@ Use `malaclaw flow runtimes` before real runs.
 ## Execution Model: Resumable, Not Unattended
 
 A flow is **resumable**: state, artifacts, and pending work survive any exit,
-and re-running `flow run` continues from the first incomplete unit. It is NOT
-an unattended daemon — nothing retries a quota blocker at 3am, and review
-cadences generate agendas/guidance only; they do not install cron jobs. A
-persistent `flow supervise` mode is planned; until it exists, plan on a human
-(or an external scheduler you own) re-running the flow after blockers clear.
+and re-running `flow run` continues from the first incomplete unit. Review
+cadences generate agendas/guidance only; they do not install cron jobs.
 
-`quota_exhausted`, `permission_blocked`, `tool_missing`, and
-`model_unavailable` pause with a blocker report and preserved state.
-`rate_limited` gets bounded in-process retries. Human and budget approval
-gates are never auto-approved.
+For long-running jobs, `malaclaw flow supervise` keeps retrying a resumable
+flow in the foreground (run it under nohup/tmux/launchd to detach — MalaClaw
+does not install OS schedulers): blockers get delayed retries with
+exponential backoff (`--retry-minutes`, capped by `--max-retry-minutes`,
+deadline `--max-hours`), approvals are polled but **never auto-approved**,
+and `.malaclaw/flow/supervisor.json` records next-retry time, blocker
+reason, and resume history for the dashboard.
+
+One flow run per workspace: the CLI, dashboard, and supervisor share a
+workspace lock (`.malaclaw/flow/lock.json`); stale locks from dead processes
+are reclaimed automatically.
+
+`quota_exhausted` pauses with a blocker report — or, when
+`runtime_policy.on_quota_exhausted: try_fallback` is set AND a declared
+`fallback:` runtime is capability-compatible with the unit, the engine
+retries that unit once on the fallback, recording a `runtime_fallback`
+event (never silent, and never for stages whose declared needs the fallback
+cannot meet). `permission_blocked`, `tool_missing`, and `model_unavailable`
+always pause. `rate_limited` gets bounded in-process retries. Human and
+budget approval gates are never auto-approved by anything, including the
+supervisor.
 
 ## Owner Roles
 

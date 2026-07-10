@@ -70,6 +70,48 @@ export async function runFlowReport(): Promise<void> {
   console.log("\nBatch approve with: malaclaw flow review --batch");
 }
 
+export async function runFlowSupervise(opts: {
+  runtime?: string;
+  retryMinutes: number;
+  maxRetryMinutes: number;
+  maxHours: number;
+}): Promise<void> {
+  const workspaceDir = process.cwd();
+  const manifest = await loadManifest(workspaceDir);
+  const resolved = await resolveManifest(manifest, { projectDir: workspaceDir });
+  if (!resolved.workflow) {
+    console.log("No workflow: section in malaclaw.yaml — nothing to supervise.");
+    process.exit(1);
+  }
+  const runtime = getWorkerRuntime(opts.runtime ?? resolved.workflow.runtime_policy?.primary ?? "dry-run");
+  const { superviseFlow } = await import("../lib/workflow/supervisor.js");
+  console.log("Supervising flow (Ctrl-C leaves the flow paused and resumable)...");
+  const state = await superviseFlow({
+    workflow: resolved.workflow,
+    workspaceDir,
+    runtime,
+    baseRetryMs: opts.retryMinutes * 60_000,
+    maxRetryMs: opts.maxRetryMinutes * 60_000,
+    maxDurationMs: opts.maxHours * 60 * 60_000,
+    onEvent: (event) => {
+      if (event.type === "retry_scheduled") {
+        console.log(`⏳ blocked; retry #${event.attempt} in ${((event.delayMs ?? 0) / 60_000).toFixed(1)} min`);
+      } else if (event.type === "waiting_approval") {
+        console.log("⏸ awaiting human approval (malaclaw flow report)");
+      } else if (event.type === "lock_busy") {
+        console.log("… another run holds the workspace lock; waiting");
+      } else if (event.type === "run_finished") {
+        console.log(`→ flow status: ${event.status}`);
+      } else if (event.type === "deadline_reached") {
+        console.log("supervision deadline reached; flow left paused");
+      }
+    },
+  });
+  printState(state);
+  await printUsageSummary(workspaceDir);
+  if (state.status === "failed") process.exit(1);
+}
+
 export async function runFlowRuntimes(opts: { runtime?: string }): Promise<void> {
   const runtimes = opts.runtime ? [getWorkerRuntime(opts.runtime)] : listWorkerRuntimes();
   console.log("# Worker runtimes\n");
