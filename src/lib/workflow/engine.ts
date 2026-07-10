@@ -249,6 +249,78 @@ async function appendValidationReport(
   await fs.appendFile(reportPath, body, "utf-8");
 }
 
+function unitTimeoutMs(workflow: WorkflowDef): number {
+  const minutes = workflow.run_limits?.max_unit_minutes;
+  return minutes !== undefined ? Math.round(minutes * 60_000) : 600_000;
+}
+
+function usageTokens(usage?: StageRunResult["usage"]): number {
+  if (!usage) return 0;
+  return usage.total_tokens ?? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+}
+
+/** Attempt-level telemetry: EVERY attempt's tokens and active time are
+ *  recorded in state (failed and retried attempts included), so run limits
+ *  never undercount consumption. */
+function recordAttemptTelemetry(
+  state: FlowState,
+  result: StageRunResult,
+  startedAtMs: number,
+): void {
+  state.telemetry.recordedTokens += usageTokens(result.usage);
+  state.telemetry.activeMs += Math.max(0, Date.now() - startedAtMs);
+}
+
+export type RunLimitCheck = { exceeded: boolean; reason?: string };
+
+/** Checked BETWEEN units: recorded tokens and active worker time vs the
+ *  workflow run_limits. Can overshoot by one in-flight unit — the per-unit
+ *  timeout bounds that overshoot; this is a guardrail, not a hard meter. */
+export function checkRunLimits(workflow: WorkflowDef, state: FlowState): RunLimitCheck {
+  const limits = workflow.run_limits;
+  if (!limits) return { exceeded: false };
+  if (limits.max_recorded_tokens !== undefined && state.telemetry.recordedTokens >= limits.max_recorded_tokens) {
+    return {
+      exceeded: true,
+      reason: `recorded tokens ${state.telemetry.recordedTokens.toLocaleString("en-US")} reached max_recorded_tokens ${limits.max_recorded_tokens.toLocaleString("en-US")}`,
+    };
+  }
+  if (limits.max_active_run_minutes !== undefined && state.telemetry.activeMs >= limits.max_active_run_minutes * 60_000) {
+    return {
+      exceeded: true,
+      reason: `active worker time ${(state.telemetry.activeMs / 60_000).toFixed(1)} min reached max_active_run_minutes ${limits.max_active_run_minutes}`,
+    };
+  }
+  return { exceeded: false };
+}
+
+async function pauseForRunLimit(
+  workspaceDir: string,
+  state: FlowState,
+  reason: string,
+): Promise<void> {
+  const reportPath = path.join(workspaceDir, "reports", "run-limits-blocker.md");
+  await fs.mkdir(path.dirname(reportPath), { recursive: true });
+  await fs.writeFile(
+    reportPath,
+    "# Run limit reached\n\n" +
+    `${reason}\n\n` +
+    "The flow paused BEFORE starting the next unit. State, artifacts, and\n" +
+    "pending work are preserved. To continue: raise the limit in the\n" +
+    "workflow's run_limits (or remove it) and re-run — completed units are\n" +
+    "not repeated. Recorded totals: " +
+    `${state.telemetry.recordedTokens.toLocaleString("en-US")} tokens, ` +
+    `${(state.telemetry.activeMs / 60_000).toFixed(1)} active minutes.\n`,
+    "utf-8",
+  );
+  await appendEvent(workspaceDir, {
+    type: "run_limit_reached",
+    reason,
+    recordedTokens: state.telemetry.recordedTokens,
+    activeMs: state.telemetry.activeMs,
+  });
+}
+
 /** Run one unit to a terminal outcome: succeeded, failed, or paused. */
 async function runUnit(
   spec: WorkUnitSpec,
@@ -265,6 +337,15 @@ async function runUnit(
   const unitRuntime = requestedRuntimeId === runtime.id ? runtime : getWorkerRuntime(requestedRuntimeId);
   unit.requestedRuntime = requestedRuntimeId;
   unit.actualRuntime = unitRuntime.id;
+
+  // Run-limit guardrail, checked before EVERY unit (standard, foreach item,
+  // loop child): pause with preserved state instead of starting new spend.
+  const limitCheck = checkRunLimits(workflow, state);
+  if (limitCheck.exceeded) {
+    unit.status = "pending";
+    await pauseForRunLimit(workspaceDir, state, limitCheck.reason ?? "run limit reached");
+    return "paused";
+  }
 
   await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
 
@@ -290,8 +371,20 @@ async function runUnit(
         skillDocs.push({ path: skillPath, content: "(skill document missing from workspace)" });
       }
     }
+    // Owner persona: roles/<owner>.md is the workspace-level convention for
+    // giving each owner distinct instructions (LongWrite compiles its agent
+    // templates into these). Absent file = owner stays a plain label.
+    let roleDoc: string | undefined;
+    try {
+      roleDoc = await fs.readFile(
+        resolveWithin(path.join(workspaceDir, "roles"), `${spec.owner}.md`),
+        "utf-8",
+      );
+    } catch {
+      roleDoc = undefined;
+    }
     const prompt = renderUnitPrompt({
-      stage: spec, unitKey, retryFeedback, skillDocs,
+      stage: spec, unitKey, retryFeedback, skillDocs, roleDoc,
       contractNotes: foreachContractNotes(workflow, spec),
     });
     await fs.mkdir(promptsDir(workspaceDir), { recursive: true });
@@ -304,14 +397,16 @@ async function runUnit(
     const logPath = resolveWithin(logsDir(workspaceDir), `${fileTag}.log`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
+    let attemptStartedAt = Date.now();
     let result = await unitRuntime.runStage({
       owner: spec.owner, instructions: prompt,
       workspaceDir, unitKey,
-      outputs: spec.outputs, timeoutMs: 600_000,
+      outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
       command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
       model: resolveModel(spec, workflow), promptPath, logPath,
     });
+    recordAttemptTelemetry(state, result, attemptStartedAt);
 
     // Rate limits back off and re-run without consuming an attempt.
     while (result.outcome === "rate_limited") {
@@ -325,13 +420,15 @@ async function runUnit(
       backoffs += 1;
       await appendEvent(workspaceDir, { type: "unit_backoff", key: unitKey, backoffs });
       await sleep(opts.backoffMs ?? 1000);
+      attemptStartedAt = Date.now();
       result = await unitRuntime.runStage({
         workspaceDir, unitKey, owner: spec.owner, instructions: prompt,
-        outputs: spec.outputs, timeoutMs: 600_000,
+        outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
         command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
         model: resolveModel(spec, workflow), promptPath, logPath,
       });
+      recordAttemptTelemetry(state, result, attemptStartedAt);
     }
 
     unit.lastOutcome = result.outcome;
@@ -355,7 +452,7 @@ async function runUnit(
       retryFeedback = report.findings;
       unit.lastError = report.findings.join("; ");
       await appendEvent(workspaceDir, {
-        type: "unit_validation_failed", key: unitKey, findings: report.findings,
+        type: "unit_validation_failed", key: unitKey, findings: report.findings, usage: result.usage,
       });
       continue;
     }
@@ -363,7 +460,7 @@ async function runUnit(
     // worker_error / timeout / validation_failed from the runtime itself
     unit.lastError = result.message ?? result.outcome;
     retryFeedback = [result.message ?? `worker reported ${result.outcome}`];
-    await appendEvent(workspaceDir, { type: "unit_attempt_failed", key: unitKey, outcome: result.outcome });
+    await appendEvent(workspaceDir, { type: "unit_attempt_failed", key: unitKey, outcome: result.outcome, usage: result.usage });
   }
 
   unit.status = "failed";

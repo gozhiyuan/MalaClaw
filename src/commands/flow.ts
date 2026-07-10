@@ -117,8 +117,8 @@ type UsageEvent = {
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; cost_usd?: number };
 };
 
-/** Sum usage across unit_succeeded events. Retried attempts that failed carry
- *  no usage event, so this understates true spend for flaky runs. */
+/** Sum usage across ALL usage-carrying events — successes, validation
+ *  failures, and worker errors — so retried work is never undercounted. */
 export async function summarizeUsage(workspaceDir: string): Promise<{
   inputTokens: number;
   outputTokens: number;
@@ -128,8 +128,9 @@ export async function summarizeUsage(workspaceDir: string): Promise<{
 }> {
   const events = (await readEvents(workspaceDir)) as UsageEvent[];
   const summary = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, unitsWithUsage: 0 };
+  const USAGE_EVENTS = new Set(["unit_succeeded", "unit_validation_failed", "unit_attempt_failed"]);
   for (const event of events) {
-    if (event.type !== "unit_succeeded" || !event.usage) continue;
+    if (!USAGE_EVENTS.has(event.type) || !event.usage) continue;
     summary.unitsWithUsage += 1;
     summary.inputTokens += event.usage.input_tokens ?? 0;
     summary.outputTokens += event.usage.output_tokens ?? 0;

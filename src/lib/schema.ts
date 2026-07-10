@@ -399,6 +399,23 @@ export const LoopStage = z
 // two shapes mutually exclusive.
 export const WorkflowStage = z.union([LoopStage, ForeachStage, StandardStage]);
 
+/** Run guardrails: what THIS workflow may consume before pausing. These are
+ *  not provider quotas (MalaClaw cannot observe subscription quota) and not
+ *  exact caps — token totals are recorded after each unit finishes, so a cap
+ *  can overshoot by one in-flight unit. The per-unit time cap bounds that. */
+export const RunLimits = z
+  .object({
+    /** Pause before starting the next unit once recorded tokens reach this. */
+    max_recorded_tokens: z.number().int().positive().optional(),
+    /** Hard per-unit timeout (replaces the built-in 10-minute default). */
+    max_unit_minutes: z.number().positive().optional(),
+    /** Total active worker time across the run (excludes approval waits). */
+    max_active_run_minutes: z.number().positive().optional(),
+    /** Only pause is implemented; the field exists so intent is explicit. */
+    on_limit: z.literal("pause").default("pause"),
+  })
+  .strict();
+
 export const WorkflowDef = z
   .object({
     mode: z.string().optional(),
@@ -412,6 +429,7 @@ export const WorkflowDef = z
     model_tiers: z.record(ModelTier).optional(),
     // Soft budget for the whole flow; enforcement arrives with real runtimes.
     budget_usd: z.number().positive().optional(),
+    run_limits: RunLimits.optional(),
     stages: z.array(WorkflowStage).min(1),
   })
   .strict()
@@ -438,6 +456,7 @@ export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;
 export type LoopStage = z.infer<typeof LoopStage>;
+export type RunLimits = z.infer<typeof RunLimits>;
 export type WorkflowStage = z.infer<typeof WorkflowStage>;
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
 

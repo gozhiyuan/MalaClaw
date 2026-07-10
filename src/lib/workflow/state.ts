@@ -41,6 +41,13 @@ export const FlowState = z.object({
   ]).default("idle"),
   units: z.record(UnitState),
   pendingApprovals: z.array(PendingApproval).default([]),
+  /** Attempt-level consumption (all attempts, including failed ones). */
+  telemetry: z
+    .object({
+      recordedTokens: z.number().default(0),
+      activeMs: z.number().default(0),
+    })
+    .default({ recordedTokens: 0, activeMs: 0 }),
   foreachItems: z.record(z.array(z.string())).default({}),
   updatedAt: z.string(),
 });
@@ -65,9 +72,13 @@ function eventsPath(workspaceDir: string): string {
   return path.join(flowDir(workspaceDir), "events.jsonl");
 }
 
-/** Stable hash of the workflow definition so a changed manifest is detected. */
+/** Stable hash of the workflow definition so a changed manifest is detected.
+ *  run_limits are excluded: they are operational guardrails, and raising a
+ *  limit to resume a paused run must not force --reset (which would wipe
+ *  completed-unit state). */
 export function workflowHash(workflow: WorkflowDef): string {
-  return crypto.createHash("sha256").update(JSON.stringify(workflow)).digest("hex").slice(0, 16);
+  const { run_limits: _runLimits, ...structural } = workflow;
+  return crypto.createHash("sha256").update(JSON.stringify(structural)).digest("hex").slice(0, 16);
 }
 
 export async function initFlowState(workflow: WorkflowDef, workspaceDir: string): Promise<FlowState> {

@@ -18,6 +18,9 @@ export type PromptContext = {
   skillDocs?: Array<{ path: string; content: string }>;
   /** Hard structural requirements (e.g. foreach fan-out id arrays). */
   contractNotes?: string[];
+  /** Owner persona/boundaries from roles/<owner>.md — makes owner a real
+   *  role, not just a label in the contract. */
+  roleDoc?: string;
 };
 
 function section(title: string, items: string[]): string {
@@ -28,10 +31,15 @@ function section(title: string, items: string[]): string {
 /** Render the file-backed stage contract handed to a WorkerRuntime.
  *  The worker is a black box; this text IS the interface. */
 export function renderUnitPrompt(ctx: PromptContext): string {
-  const { stage, unitKey, retryFeedback, skillDocs, contractNotes } = ctx;
+  const { stage, unitKey, retryFeedback, skillDocs, contractNotes, roleDoc } = ctx;
   let prompt = `Stage: ${unitKey}\n`;
   if (stage.title) prompt += `Title: ${stage.title}\n`;
   prompt += `Owner: ${stage.owner}\n\n`;
+  if (roleDoc && roleDoc.trim().length > 0) {
+    prompt +=
+      `You are acting as the "${stage.owner}" role. Follow these role instructions:\n` +
+      "---\n" + roleDoc.trim() + "\n---\n\n";
+  }
   prompt += section("Inputs", stage.inputs);
   prompt += section("Optional inputs (use if present, never required)", stage.optional_inputs);
   prompt += section("Required outputs", stage.outputs);
