@@ -313,6 +313,7 @@ Still intentionally post-MVP:
 - [docs/repo-workflow.md](./docs/repo-workflow.md)
 - [docs/how-it-works.md](./docs/how-it-works.md)
 - [docs/remote-access.md](./docs/remote-access.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## Reference Work
 

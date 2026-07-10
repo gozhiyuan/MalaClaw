@@ -1,51 +1,163 @@
-# Contributing to malaclaw
+# Contributing to MalaClaw
 
-## Submitting a new agent, team, or pack
+MalaClaw is the workflow/runtime layer. Contribute here when the change is
+about generic orchestration rather than a specific writing product.
 
-1. Fork this repo
-2. Copy `templates/agents/_template.yaml` to `templates/agents/<your-id>.yaml`
-3. Fill in all required fields (schema reference: `docs/how-it-works.md`)
-4. Run `malaclaw validate` — must pass with zero errors
-5. Add a team or pack YAML that uses your agent (optional but recommended)
-6. Add yourself to the `contributors/` directory (see `contributors/_template.md`)
-7. Open a PR with title: `feat(template): add <your-agent-name>`
+Good MalaClaw contributions include:
 
-## Checklist before submitting
+- workflow schema and validation,
+- flow scheduling, retries, approvals, foreach, loop groups, state, logs,
+- worker runtimes such as `codex`, `claude-code`, API runtimes, `script`,
+- runtime capability checks, telemetry, cost/token reporting,
+- dashboard host features that apply to every product,
+- dashboard extension contracts and loader behavior,
+- generic agent/team/pack templates.
 
-- [ ] `malaclaw validate` passes
-- [ ] `npm test` passes
-- [ ] Agent has a realistic `soul.persona` with correct `{{variable}}` syntax
-- [ ] Capabilities match the role (`sessions_spawn: false` for non-leads)
-- [ ] All `shared_memory` files have explicit `access` and `writer` fields
-- [ ] Team has a `communication.topology` or a graph that infers correctly (check with `malaclaw team show`)
-- [ ] If using non-star topologies, note runtime compatibility (lead-reviewer needs OpenClaw/ClawTeam; pipeline/peer-mesh need ClawTeam)
-- [ ] A `description` is provided in the pack YAML
-- [ ] Trust tier is set correctly (`local` for personal, `community` for submissions)
+Product-specific writing behavior belongs in LongWrite instead: research
+providers, citation checks, novel bibles, book chapter contracts, manuscript
+builders, writing scorecards, and the LongWrite dashboard tab.
 
-## Trust tiers
-
-| Tier | Requirements |
-|---|---|
-| `local` | User-owned, not reviewed |
-| `community` | PR reviewed, schema valid, example included |
-| `curated` | Maintainer-recommended, tested on multiple OpenClaw versions |
-| `official` | Maintained by this repo |
-
-## Running tests
+## Local Setup
 
 ```bash
 npm install
+npm run build
+npm test
+
+cd dashboard
+npm install
 npm test
 npm run build
-malaclaw validate
+cd ..
 ```
 
-## Runtime compatibility
+Use the built CLI directly while developing:
 
-Teams using advanced topologies (pipeline, peer-mesh) require ClawTeam as the runtime target. Lead-reviewer topology requires OpenClaw or ClawTeam. Star topology works on all runtimes.
+```bash
+node dist/cli.js --help
+node dist/cli.js flow runtimes
+```
 
-When contributing a team with non-star topology, document the runtime requirement in the pack description.
+Or link it:
 
-## Compatibility policy
+```bash
+npm link
+malaclaw --help
+```
 
-Each pack YAML should include a `compatibility` block declaring the minimum OpenClaw and Node versions it was tested with. CI will validate against the versions listed in `compatibility-matrix.yaml`.
+## Safe Smoke Tests
+
+These checks do not spend model quota:
+
+```bash
+node dist/cli.js validate
+node dist/cli.js flow runtimes
+node dist/cli.js flow smoke-runtime --runtime dry-run --cleanup
+npm run smoke:package
+```
+
+If you changed a real worker runtime and have the CLI logged in:
+
+```bash
+node dist/cli.js flow runtimes --runtime codex
+node dist/cli.js flow smoke-runtime --runtime codex --cleanup
+
+node dist/cli.js flow runtimes --runtime claude-code
+node dist/cli.js flow smoke-runtime --runtime claude-code --cleanup
+```
+
+Real-runtime smoke tests may spend quota. Keep them small and say which account
+runtime/model you used in the PR.
+
+## Full Pre-PR Checklist
+
+Run the same checks as CI:
+
+```bash
+npm ci
+npx tsc --noEmit
+npm test
+npm run build
+node dist/cli.js validate
+
+cd dashboard
+npm ci
+npm test
+npm run build
+cd ..
+
+npm pack --dry-run
+npm run smoke:package
+```
+
+Expected current counts are roughly:
+
+- root tests: 42 files, 332 passing, 1 skipped,
+- dashboard tests: 7 files, 35 passing.
+
+Counts may change as tests are added; failures should not be ignored.
+
+## Dashboard Extension Boundary
+
+The dashboard host is product-independent. Core dashboard code should not import
+LongWrite routes, LongWrite config, or LongWrite UI directly.
+
+Server extensions are loaded at runtime from trusted local modules:
+
+```yaml
+dashboard:
+  server_extensions:
+    - /path/to/product/dashboard-extension/dist/server/index.js
+```
+
+Client tabs are bundled at dashboard build time from known local product
+checkouts. For alpha, this keeps packaging simple and avoids remote module
+loading.
+
+When changing extension behavior, update:
+
+- `docs/dashboard-extensions.md`,
+- `docs/repo-workflow.md`,
+- package smoke coverage if package behavior changes.
+
+## Worker Runtime Rules
+
+Every runtime must declare capabilities through `checkAvailable()` so the engine
+can reject incompatible stages before spending tokens.
+
+Use these boundaries:
+
+- `dry-run`: contract simulation only,
+- `script`: deterministic commands with explicit `cmd` and `args`,
+- API runtimes: one prompt, one concrete output, optional declared command tool
+  where implemented,
+- `codex` / `claude-code`: full CLI harnesses for multi-file/tool work.
+
+If a runtime changes model, usage, cost, timeout, or quota behavior, update
+`docs/workflow-runtime.md` and add or adjust tests.
+
+## Template Contributions
+
+For agents, teams, packs, and starters:
+
+1. Add YAML under `templates/`, `packs/`, or `starters/`.
+2. Keep IDs lowercase and stable.
+3. Add enough description for `malaclaw starter list` and dashboard catalog use.
+4. Run:
+
+```bash
+node dist/cli.js validate
+npm test
+```
+
+OpenClaw remains a supported adapter, but new docs and templates should describe
+MalaClaw as a workflow/runtime control plane first.
+
+## Pull Request Notes
+
+In the PR description, include:
+
+- what runtime or workflow surface changed,
+- whether the change can spend model quota,
+- exact validation commands run,
+- any known limitations or deferred work.

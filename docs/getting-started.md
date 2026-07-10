@@ -9,9 +9,18 @@ not the required first step.
 - Node.js 22+
 - npm
 - Optional real workers:
-  - Claude Code for `claude-code`
-  - Codex for `codex`
-  - local/OpenAI-compatible server for `openai-compatible`
+  - Claude Code CLI, logged in, for `claude-code`
+  - Codex CLI, logged in, for `codex`
+  - local/OpenAI-compatible server for `openai-compatible` / `ollama`
+  - API keys for hosted API runtimes:
+    - `ANTHROPIC_API_KEY` or `MALACLAW_ANTHROPIC_API_KEY`
+    - `GEMINI_API_KEY` / `GOOGLE_API_KEY` or `MALACLAW_GEMINI_API_KEY`
+    - `MALACLAW_OPENAI_API_KEY` for hosted OpenAI-compatible endpoints
+
+Start with `dry-run` and `script`; they do not require subscriptions, API keys,
+or model quota. Use `codex` or `claude-code` for stages that need real harness
+behavior such as multi-file edits, shell tools, skills, or build/debug loops.
+Use API/local runtimes for cheaper single-output stages.
 
 ## 1. Build and Test
 
@@ -19,6 +28,16 @@ not the required first step.
 npm install
 npm run build
 npm test
+```
+
+If you want the dashboard from a source checkout:
+
+```bash
+cd dashboard
+npm install
+npm run build
+npm test
+cd ..
 ```
 
 Use the built CLI directly:
@@ -40,6 +59,9 @@ malaclaw --help
 malaclaw flow runtimes
 malaclaw flow runtimes --runtime codex
 malaclaw flow runtimes --runtime claude-code
+malaclaw flow runtimes --runtime anthropic-api
+malaclaw flow runtimes --runtime gemini-api
+malaclaw flow runtimes --runtime ollama
 ```
 
 These checks do not spend model quota.
@@ -193,3 +215,35 @@ malaclaw install --dry-run
 
 Starters are still useful for provisioning examples, but LongWrite-style
 workflow projects can also generate `malaclaw.yaml` directly.
+
+## 9. Optional: Dashboard
+
+The dashboard is a generic MalaClaw host: it shows workflow state, approvals,
+usage summaries, logs, and prompts. Product-specific tabs, such as LongWrite,
+load through trusted local extensions.
+
+```bash
+malaclaw dashboard
+```
+
+To load LongWrite routes, configure the built LongWrite extension:
+
+```yaml
+# ~/.malaclaw/dashboard.yaml
+dashboard:
+  server_extensions:
+    - /path/to/longwrite-agent/dashboard-extension/dist/server/index.js
+```
+
+Then check it:
+
+```bash
+malaclaw dashboard-extensions doctor
+malaclaw dashboard
+```
+
+## 10. Contribute
+
+Read [`../CONTRIBUTING.md`](../CONTRIBUTING.md). Contribute generic workflow
+engine, runtime, dashboard host, schema, and template work to MalaClaw.
+Contribute writing modes and manuscript-domain behavior to LongWrite.
