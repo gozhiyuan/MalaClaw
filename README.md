@@ -158,7 +158,9 @@ export MALACLAW_GEMINI_MODEL=gemini-2.5-flash
 For local servers, `MALACLAW_OPENAI_API_KEY` is optional when the base URL is
 localhost. See [docs/workflow-runtime.md](./docs/workflow-runtime.md) for
 choosing between single-shot API runtimes and agentic CLI harnesses, model
-tiers, and budget approval gates.
+tiers, budget approval gates, and the runtime capability rules that constrain
+workflow YAML fields such as `outputs`, `command`, `allowed_tools`, and
+`skills`.
 
 ## Provisioning Adapters
 

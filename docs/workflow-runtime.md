@@ -78,19 +78,82 @@ prints these, and `flow run` validates every stage against its resolved
 runtime **before executing anything** — a mismatch fails fast with the full
 list instead of dying mid-run.
 
-| Capability | Meaning |
-| --- | --- |
-| `single_output` | Writes one model response into one concrete output file. |
-| `multi_file_edit` | Reads the workspace, writes multiple declared outputs. |
-| `declared_command_tool` | Can invoke the stage-declared `command:` as a tool. |
-| `provider_tool_calling` | Provider-native tool/function calling. |
-| `cli_harness_tools` | Full CLI harness: shell/file tools, skills, MCP. |
+Capabilities are contract flags, not marketing labels. They constrain which
+YAML fields a runtime may execute.
+
+| Capability | Meaning | YAML shape that requires it | Good fits |
+| --- | --- | --- | --- |
+| `single_output` | Can write one model response into one concrete output file. | A stage or foreach step with exactly one non-glob `outputs:` path. | API summary, classification, single review memo, one Markdown artifact. |
+| `multi_file_edit` | Can read the workspace and create/update multiple declared files in one unit. | More than one concrete `outputs:` path, or any output path containing `*`. | Harness edits across chapters, a LaTeX source plus report, generated file sets. |
+| `declared_command_tool` | Can expose the stage's exact `command:` as a controlled tool during generation, or run it directly for deterministic workers. | A stage with `command: { cmd, args }`. | Retrieval helper, validator, small local analyzer, one approved tool call. |
+| `provider_tool_calling` | Can use provider-native tool/function-call protocol. | No direct YAML requirement today; used by runtime implementation and future tool routing. | API runtimes that can perform one controlled tool round. |
+| `cli_harness_tools` | Has a full CLI agent harness: file tools, shell/debug loops, skills/MCP, provider permissions. | Any non-empty `allowed_tools:` list. | Claude Code/Codex stages that need Bash, web/search tools, MCP, or broad project editing. |
 
 Alpha matrix: `claude-code`/`codex` are full harnesses; `openai-api`,
 `openai-compatible`, and `anthropic-api` are single-output with the
 declared-command tool; `gemini-api` and `ollama` are single-output only;
 `script` is deterministic; `dry-run` simulates every contract so any
 workflow stays CI-runnable. The runtimes are deliberately not equivalent.
+
+### How MalaClaw Infers Stage Requirements
+
+MalaClaw derives required capabilities from the stage declaration:
+
+| Stage declaration | Required capability | Why |
+| --- | --- | --- |
+| `outputs: [draft.md]` | `single_output` | The worker only needs to produce one concrete artifact. |
+| `outputs: [paper/main.tex, build/manuscript.pdf]` | `multi_file_edit` | One unit is responsible for multiple files. |
+| `outputs: [chapters/*.md]` | `multi_file_edit` | A glob means the unit may produce a file set. |
+| `command: { cmd: node, args: [tools/retrieve.js] }` | `declared_command_tool` | The runtime must be able to invoke or own that exact command. |
+| `allowed_tools: [Bash, WebSearch]` | `cli_harness_tools` | Only CLI harness runtimes can grant provider/harness tools. |
+| `skills: [skills/style.md]` | none by itself | Skill files are injected into the prompt for any runtime; they do not grant tools. |
+| `tools: [web_search]` | none by itself | `tools` is advisory prompt text. Use `allowed_tools` for real harness grants or a `command` for a controlled local tool. |
+
+Example mismatch:
+
+```yaml
+workflow:
+  stages:
+    - id: build_paper
+      owner: builder
+      runtime: openai-api
+      outputs:
+        - paper/main.tex
+        - build/manuscript.pdf
+```
+
+`openai-api` is a single-output API worker, so `flow run` rejects this before
+execution:
+
+```text
+Stage/runtime capability mismatches (fix the manifest or pick another --runtime):
+  - build_paper: declares 2 outputs but runtime "openai-api" is single-output — use claude-code, codex, or script
+```
+
+Split the work when using API runtimes:
+
+```yaml
+workflow:
+  stages:
+    - id: write_latex
+      owner: writer
+      runtime: openai-api
+      outputs:
+        - paper/main.tex
+
+    - id: build_pdf
+      owner: builder
+      runtime: script
+      needs: [write_latex]
+      command:
+        cmd: npm
+        args: [run, build:pdf]
+      outputs:
+        - build/manuscript.pdf
+```
+
+Use `claude-code` or `codex` instead when one agentic stage should edit files,
+run builds, inspect failures, and retry.
 
 ## Stage Tools and Skills
 

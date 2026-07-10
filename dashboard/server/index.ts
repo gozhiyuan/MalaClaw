@@ -38,6 +38,10 @@ function resolveClientRoot(): string {
   return candidates.find((candidate) => existsSync(path.join(candidate, "index.html"))) ?? candidates[0];
 }
 
+function hasBuiltClient(): boolean {
+  return existsSync(path.join(resolveClientRoot(), "index.html"));
+}
+
 type HttpError = Error & {
   statusCode?: number;
   code?: string;
@@ -52,6 +56,7 @@ export async function createServer(opts: { host?: string; port?: number; authTok
   const host = opts.host ?? "127.0.0.1";
   const port = opts.port ?? 3456;
   const isDev = process.env.NODE_ENV !== "production";
+  const serveBuiltClient = !isDev || hasBuiltClient();
 
   const statusProvider = new RuntimeStatusProvider();
   // Start OpenClaw observer by default (existing behavior)
@@ -93,8 +98,10 @@ export async function createServer(opts: { host?: string; port?: number; authTok
     });
   });
 
-  // Static files in production
-  if (!isDev) {
+  // Serve the built SPA whenever it is available. Source-checkout CLI launches
+  // often run with NODE_ENV unset, but users still expect `malaclaw dashboard`
+  // to open the built dashboard instead of an API-only Fastify server.
+  if (serveBuiltClient) {
     await app.register(fastifyStatic, {
       root: resolveClientRoot(),
       wildcard: false,
