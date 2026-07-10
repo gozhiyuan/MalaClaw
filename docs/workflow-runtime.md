@@ -71,6 +71,48 @@ runtime only runs one unit headlessly.
 
 Use `malaclaw flow runtimes` before real runs.
 
+## Execution Model: Resumable, Not Unattended
+
+A flow is **resumable**: state, artifacts, and pending work survive any exit,
+and re-running `flow run` continues from the first incomplete unit. It is NOT
+an unattended daemon — nothing retries a quota blocker at 3am, and review
+cadences generate agendas/guidance only; they do not install cron jobs. A
+persistent `flow supervise` mode is planned; until it exists, plan on a human
+(or an external scheduler you own) re-running the flow after blockers clear.
+
+`quota_exhausted`, `permission_blocked`, `tool_missing`, and
+`model_unavailable` pause with a blocker report and preserved state.
+`rate_limited` gets bounded in-process retries. Human and budget approval
+gates are never auto-approved.
+
+## Owner Roles
+
+`owner:` on a stage is a role label. It becomes a real persona when the
+workspace contains `roles/<owner>.md` — the engine injects that document into
+every stage prompt for that owner (LongWrite compiles its agent templates
+into these at init). Without the file, the owner remains a label in the
+contract; it is NOT a separate agent system prompt.
+
+## Run Limits (Guardrails, Not Meters)
+
+```yaml
+workflow:
+  run_limits:
+    max_recorded_tokens: 100000   # pause before the NEXT unit at this total
+    max_unit_minutes: 10          # hard per-unit timeout (default 10 min)
+    max_active_run_minutes: 120   # total worker time, excludes approval waits
+    on_limit: pause               # the only policy: never silent downgrades
+```
+
+Distinguish three things the dashboard should never conflate: your
+**provider's plan quota** (not observable by MalaClaw), **this run's
+limits** (the guardrails above), and **observed telemetry** (recorded
+tokens/time, including failed attempts). Token totals are recorded after a
+unit finishes, so a cap can overshoot by one in-flight unit — the per-unit
+timeout bounds that. Costs: claude-code reports a cost figure (not billing
+truth); codex reports combined tokens only; API runtimes report token counts
+without dollar estimates.
+
 ## Runtime Capabilities
 
 Every worker runtime declares what it can do; `malaclaw flow runtimes`
