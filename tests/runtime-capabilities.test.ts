@@ -139,6 +139,43 @@ describe("stage skills and allowed_tools", () => {
     expect(seen[0].instructions).toContain("Short sentences.");
   });
 
+  it("expands skill globs and foreach skill templates before rendering", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "evidence"), { recursive: true });
+    await fs.writeFile(path.join(ws, "outline.json"), JSON.stringify({ sections: [{ id: "section-1" }] }), "utf-8");
+    await fs.writeFile(path.join(ws, "evidence", "section-section-1.json"), "section-specific evidence", "utf-8");
+    await fs.writeFile(path.join(ws, "evidence", "shared.json"), "shared evidence", "utf-8");
+    const seen: string[] = [];
+    const inner = new DryRunRuntime();
+    const spy = {
+      id: "dry-run", capabilities: inner.capabilities,
+      checkAvailable: () => inner.checkAvailable(),
+      runStage: async (req: Parameters<DryRunRuntime["runStage"]>[0]) => {
+        seen.push(req.instructions);
+        return inner.runStage(req);
+      },
+    };
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "outline", owner: "planner", outputs: ["outline.json"] },
+        {
+          id: "draft", type: "foreach", foreach: "outline.sections", item_name: "section",
+          steps: [{
+            id: "write", owner: "writer", outputs: ["chapters/{{section.id}}.md"],
+            skills: ["evidence/section-{{section.id}}.json", "evidence/*.json"],
+          }],
+        },
+      ],
+    });
+    // The producer is already present. Marking the state is unnecessary: the
+    // dry-run writes the same valid foreach contract on its first unit.
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: spy });
+    expect(state.status).toBe("completed");
+    const draftPrompt = seen.find((prompt) => prompt.includes("Stage: draft.write[section-1]")) ?? "";
+    expect(draftPrompt).toContain("section-specific evidence");
+    expect(draftPrompt).toContain("shared evidence");
+  });
+
   it("claude-code merges stage grants with safe defaults", async () => {
     const ws = await makeWorkspace();
     const rt = new ClaudeCodeRuntime({

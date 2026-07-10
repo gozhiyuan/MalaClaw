@@ -13,6 +13,8 @@ export const UnitState = z.object({
   lastError: z.string().optional(),
   requestedRuntime: z.string().optional(),
   actualRuntime: z.string().optional(),
+  requestedModel: z.string().optional(),
+  actualModel: z.string().optional(),
   approvalGranted: z.boolean().default(false),
   budgetApproved: z.boolean().default(false),
 });

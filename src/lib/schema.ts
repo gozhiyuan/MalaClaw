@@ -283,12 +283,23 @@ export const ModelTier = z
   })
   .strict();
 
+/** A quota fallback can name only a runtime (using that runtime's default
+ * model), or pin the fallback provider's model explicitly. Keeping the model
+ * with the fallback prevents a Claude model id from being passed to Codex. */
+export const RuntimeFallbackCandidate = z.union([
+  z.string().min(1),
+  z.object({
+    runtime: z.string().min(1),
+    model: z.string().min(1).optional(),
+  }).strict(),
+]);
+
 // Explicit runtime selection + failure policy. Fallback is never silent:
 // the engine records requested vs actual runtime/model in state and events.
 export const RuntimePolicy = z
   .object({
     primary: z.string().min(1).default("dry-run"),
-    fallback: z.array(z.string()).default([]),
+    fallback: z.array(RuntimeFallbackCandidate).default([]),
     on_rate_limit: z.enum(["backoff", "fail"]).default("backoff"),
     on_quota_exhausted: z.enum(["try_fallback", "pause"]).default("pause"),
     on_budget_exceeded: z.enum(["require_approval", "pause"]).default("require_approval"),
@@ -450,6 +461,7 @@ export const WorkflowDef = z
 export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
 export type StageRunOutcome = z.infer<typeof StageRunOutcome>;
 export type ModelTier = z.infer<typeof ModelTier>;
+export type RuntimeFallbackCandidate = z.infer<typeof RuntimeFallbackCandidate>;
 export type RuntimePolicy = z.infer<typeof RuntimePolicy>;
 export type WorkflowCommand = z.infer<typeof WorkflowCommand>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;

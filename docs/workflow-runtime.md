@@ -77,27 +77,38 @@ A flow is **resumable**: state, artifacts, and pending work survive any exit,
 and re-running `flow run` continues from the first incomplete unit. Review
 cadences generate agendas/guidance only; they do not install cron jobs.
 
-For long-running jobs, `malaclaw flow supervise` keeps retrying a resumable
-flow in the foreground (run it under nohup/tmux/launchd to detach — MalaClaw
-does not install OS schedulers): blockers get delayed retries with
+For long-running jobs, `malaclaw flow supervise` keeps a resumable flow in
+the foreground (run it under nohup/tmux/launchd to detach — MalaClaw does not
+install OS schedulers). Quota/rate/runtime blockers get delayed retries with
 exponential backoff (`--retry-minutes`, capped by `--max-retry-minutes`,
-deadline `--max-hours`), approvals are polled but **never auto-approved**,
-and `.malaclaw/flow/supervisor.json` records next-retry time, blocker
-reason, and resume history for the dashboard.
+deadline `--max-hours`); approvals are polled but **never auto-approved**.
+Configured `run_limits` are different: the supervisor stops immediately and
+records the operator action required. Raise/remove the limit, then start a
+new supervisor to resume completed work without reset. `.malaclaw/flow/
+supervisor.json` records blocker type, next retry, and history for the
+dashboard.
 
-One flow run per workspace: the CLI, dashboard, and supervisor share a
-workspace lock (`.malaclaw/flow/lock.json`); stale locks from dead processes
-are reclaimed automatically.
+One supervisor or flow run per workspace: the CLI, dashboard, and supervisor
+share a tokenized workspace lock (`.malaclaw/flow/lock.json`); stale locks
+from dead processes are reclaimed automatically. A supervisor holds its lease
+while it waits, so a second supervisor fails rather than racing retries.
 
 `quota_exhausted` pauses with a blocker report — or, when
-`runtime_policy.on_quota_exhausted: try_fallback` is set AND a declared
-`fallback:` runtime is capability-compatible with the unit, the engine
-retries that unit once on the fallback, recording a `runtime_fallback`
-event (never silent, and never for stages whose declared needs the fallback
-cannot meet). `permission_blocked`, `tool_missing`, and `model_unavailable`
-always pause. `rate_limited` gets bounded in-process retries. Human and
-budget approval gates are never auto-approved by anything, including the
-supervisor.
+`runtime_policy.on_quota_exhausted: try_fallback` is set and a declared,
+available fallback meets the unit's capabilities, the engine retries once on
+that fallback and records requested/actual runtime and model. A cross-runtime
+fallback uses that runtime's default model unless it pins one explicitly:
+
+```yaml
+runtime_policy:
+  fallback:
+    - runtime: codex
+      model: gpt-5-mini
+```
+
+`permission_blocked`, `tool_missing`, and `model_unavailable` always pause.
+`rate_limited` gets bounded in-process retries. Human and budget approval
+gates are never auto-approved by anything, including the supervisor.
 
 ## Owner Roles
 
@@ -121,8 +132,9 @@ workflow:
 Distinguish three things the dashboard should never conflate: your
 **provider's plan quota** (not observable by MalaClaw), **this run's
 limits** (the guardrails above), and **observed telemetry** (recorded
-tokens/time, including failed attempts). Token totals are recorded after a
-unit finishes, so a cap can overshoot by one in-flight unit — the per-unit
+tokens/time, including blocked attempts). Token totals are recorded after a
+unit finishes, so a cap can overshoot by the work already in flight (up to the
+active parallelism) — the per-unit
 timeout bounds that. Costs: claude-code reports a cost figure (not billing
 truth); codex reports combined tokens only; API runtimes report token counts
 without dollar estimates.

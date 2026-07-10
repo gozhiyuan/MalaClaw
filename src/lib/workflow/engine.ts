@@ -8,6 +8,7 @@ import type {
   WorkflowDef,
   WorkflowStage,
   WorkflowStep,
+  RuntimeFallbackCandidate,
 } from "../schema.js";
 import {
   appendEvent,
@@ -42,6 +43,12 @@ export type RunFlowOptions = {
 };
 
 const MAX_BACKOFFS = 5;
+// Skill documents are prompt context, not an unbounded workspace dump. These
+// caps keep a broad glob such as fulltext/*.md from silently exhausting a
+// provider context window. Workers can still use the declared file paths via
+// a CLI harness when their runtime supports it.
+const MAX_SKILL_DOCUMENTS = 24;
+const MAX_SKILL_CHARS = 180_000;
 const PAUSE_OUTCOMES = new Set([
   "quota_exhausted",
   "permission_blocked",
@@ -84,6 +91,81 @@ function concreteOutputs(outputs: string[]): string[] {
   return outputs.filter((o) => !o.includes("*") && !o.includes("{{"));
 }
 
+function artifactPatternToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/\{\{[^}]+\}\}/g, "*")
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+async function listWorkspaceFiles(root: string, relative = ""): Promise<string[]> {
+  const absolute = relative ? resolveWithin(root, relative) : root;
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(absolute, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    // Do not inject engine logs/prompts or traverse symlinks. Skill globs are
+    // deliberately limited to ordinary workspace artifacts.
+    if (entry.name === ".malaclaw" || entry.isSymbolicLink()) continue;
+    const rel = relative ? path.posix.join(relative, entry.name) : entry.name;
+    if (entry.isDirectory()) files.push(...await listWorkspaceFiles(root, rel));
+    else if (entry.isFile()) files.push(rel);
+  }
+  return files;
+}
+
+/** Resolve static paths, foreach templates, and workspace-local `*` skill
+ * globs into bounded prompt documents. Globs are expanded deterministically
+ * in lexical order so a rerun receives the same evidence context. */
+async function loadSkillDocuments(
+  workspaceDir: string,
+  skillPaths: string[],
+): Promise<Array<{ path: string; content: string }>> {
+  const allFiles = skillPaths.some((skillPath) => skillPath.includes("*"))
+    ? await listWorkspaceFiles(workspaceDir)
+    : [];
+  const resolved = new Set<string>();
+  for (const skillPath of skillPaths) {
+    if (skillPath.includes("*")) {
+      const regex = artifactPatternToRegex(skillPath);
+      for (const file of allFiles) if (regex.test(file)) resolved.add(file);
+    } else {
+      resolved.add(skillPath);
+    }
+  }
+
+  const docs: Array<{ path: string; content: string }> = [];
+  let remaining = MAX_SKILL_CHARS;
+  for (const skillPath of [...resolved].sort()) {
+    if (docs.length >= MAX_SKILL_DOCUMENTS || remaining <= 0) break;
+    try {
+      const content = await fs.readFile(resolveWithin(workspaceDir, skillPath), "utf-8");
+      const clipped = content.slice(0, remaining);
+      docs.push({
+        path: skillPath,
+        content: clipped.length < content.length
+          ? `${clipped}\n\n[Longer skill document truncated by MalaClaw prompt-context limit.]`
+          : clipped,
+      });
+      remaining -= clipped.length;
+    } catch {
+      // Preserve the prior fail-visible behavior for declared but missing
+      // static skill documents. A glob that matches nothing is not an error.
+      if (!skillPath.includes("*")) docs.push({ path: skillPath, content: "(skill document missing from workspace)" });
+    }
+  }
+  if (resolved.size > docs.length && docs.length >= MAX_SKILL_DOCUMENTS) {
+    docs.push({ path: "[skill-context-limit]", content: `Only the first ${MAX_SKILL_DOCUMENTS} skill documents were injected.` });
+  }
+  return docs;
+}
+
 function resolveRuntimeId(spec: WorkUnitSpec, workflow: WorkflowDef, fallback: string): string {
   if (spec.runtime) return spec.runtime;
   if (spec.model_tier && workflow.model_tiers?.[spec.model_tier]) {
@@ -96,6 +178,10 @@ function resolveModel(spec: WorkUnitSpec, workflow: WorkflowDef): string | undef
   if (spec.model) return spec.model;
   if (spec.model_tier) return workflow.model_tiers?.[spec.model_tier]?.model;
   return undefined;
+}
+
+function normalizeFallback(candidate: RuntimeFallbackCandidate): { runtime: string; model?: string } {
+  return typeof candidate === "string" ? { runtime: candidate } : candidate;
 }
 
 /** When a unit produces the artifact a later foreach stage fans out over,
@@ -265,13 +351,27 @@ function usageTokens(usage?: StageRunResult["usage"]): number {
 /** Attempt-level telemetry: EVERY attempt's tokens and active time are
  *  recorded in state (failed and retried attempts included), so run limits
  *  never undercount consumption. */
-function recordAttemptTelemetry(
+async function recordAttemptTelemetry(
+  workspaceDir: string,
   state: FlowState,
+  unitKey: string,
   result: StageRunResult,
   startedAtMs: number,
-): void {
+  runtime: string,
+  model?: string,
+): Promise<void> {
   state.telemetry.recordedTokens += usageTokens(result.usage);
-  state.telemetry.activeMs += Math.max(0, Date.now() - startedAtMs);
+  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  state.telemetry.activeMs += elapsedMs;
+  await appendEvent(workspaceDir, {
+    type: "unit_attempt_finished",
+    key: unitKey,
+    outcome: result.outcome,
+    runtime,
+    model,
+    elapsedMs,
+    usage: result.usage,
+  });
 }
 
 export type RunLimitCheck = { exceeded: boolean; reason?: string };
@@ -338,8 +438,11 @@ async function runUnit(
   const maxAttempts = spec.retry?.max_attempts ?? 2;
   const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
   const unitRuntime = requestedRuntimeId === runtime.id ? runtime : getWorkerRuntime(requestedRuntimeId);
+  const requestedModel = resolveModel(spec, workflow);
   unit.requestedRuntime = requestedRuntimeId;
   unit.actualRuntime = unitRuntime.id;
+  unit.requestedModel = requestedModel;
+  unit.actualModel = requestedModel;
 
   // Run-limit guardrail, checked before EVERY unit (standard, foreach item,
   // loop child): pause with preserved state instead of starting new spend.
@@ -363,17 +466,7 @@ async function runUnit(
       requestedRuntime: requestedRuntimeId, actualRuntime: unitRuntime.id,
     });
 
-    const skillDocs: Array<{ path: string; content: string }> = [];
-    for (const skillPath of spec.skills) {
-      try {
-        skillDocs.push({
-          path: skillPath,
-          content: await fs.readFile(resolveWithin(workspaceDir, skillPath), "utf-8"),
-        });
-      } catch {
-        skillDocs.push({ path: skillPath, content: "(skill document missing from workspace)" });
-      }
-    }
+    const skillDocs = await loadSkillDocuments(workspaceDir, spec.skills);
     // Owner persona: roles/<owner>.md is the workspace-level convention for
     // giving each owner distinct instructions (LongWrite compiles its agent
     // templates into these). Absent file = owner stays a plain label.
@@ -407,9 +500,9 @@ async function runUnit(
       outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
       command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
-      model: resolveModel(spec, workflow), promptPath, logPath,
+      model: requestedModel, promptPath, logPath,
     });
-    recordAttemptTelemetry(state, result, attemptStartedAt);
+    await recordAttemptTelemetry(workspaceDir, state, unitKey, result, attemptStartedAt, unitRuntime.id, requestedModel);
 
     // Rate limits back off and re-run without consuming an attempt.
     while (result.outcome === "rate_limited") {
@@ -429,9 +522,9 @@ async function runUnit(
         outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
         command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
-        model: resolveModel(spec, workflow), promptPath, logPath,
+        model: requestedModel, promptPath, logPath,
       });
-      recordAttemptTelemetry(state, result, attemptStartedAt);
+      await recordAttemptTelemetry(workspaceDir, state, unitKey, result, attemptStartedAt, unitRuntime.id, requestedModel);
     }
 
     unit.lastOutcome = result.outcome;
@@ -441,17 +534,30 @@ async function runUnit(
     // this unit. Never silent — recorded in state and events. Anything else
     // pauses exactly as before.
     if (result.outcome === "quota_exhausted" && workflow.runtime_policy?.on_quota_exhausted === "try_fallback") {
-      const fallbackId = (workflow.runtime_policy.fallback ?? []).find((candidate) => {
-        if (candidate === unitRuntime.id) return false;
-        return unitCapabilityFindings({ ...spec, runtime: candidate }, workflow, candidate).length === 0;
-      });
-      if (fallbackId) {
-        const fallbackRuntime = getWorkerRuntime(fallbackId);
+      let fallback: { runtime: string; model?: string } | undefined;
+      let fallbackRuntime: WorkerRuntime | undefined;
+      for (const rawCandidate of workflow.runtime_policy.fallback ?? []) {
+        const candidate = normalizeFallback(rawCandidate);
+        if (candidate.runtime === unitRuntime.id) continue;
+        if (unitCapabilityFindings({ ...spec, runtime: candidate.runtime }, workflow, candidate.runtime).length > 0) continue;
+        const candidateRuntime = getWorkerRuntime(candidate.runtime);
+        if (!(await candidateRuntime.checkAvailable()).available) continue;
+        fallback = candidate;
+        fallbackRuntime = candidateRuntime;
+        break;
+      }
+      if (fallback && fallbackRuntime) {
+        // A fallback provider must not inherit the primary provider's model
+        // id. Bare cross-runtime fallbacks use their runtime default; same-
+        // runtime fallbacks keep the selected model unless overridden.
+        const fallbackModel = fallback.model ?? (fallback.runtime === unitRuntime.id ? requestedModel : undefined);
         await appendEvent(workspaceDir, {
           type: "runtime_fallback", key: unitKey,
-          from: unitRuntime.id, to: fallbackId, reason: "quota_exhausted",
+          from: unitRuntime.id, to: fallback.runtime, fromModel: requestedModel,
+          toModel: fallbackModel, reason: "quota_exhausted",
         });
-        unit.actualRuntime = fallbackId;
+        unit.actualRuntime = fallback.runtime;
+        unit.actualModel = fallbackModel;
         const fallbackStartedAt = Date.now();
         result = await fallbackRuntime.runStage({
           owner: spec.owner, instructions: prompt,
@@ -459,9 +565,9 @@ async function runUnit(
           outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
           command: spec.command,
           allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
-          model: resolveModel(spec, workflow), promptPath, logPath,
+          model: fallbackModel, promptPath, logPath,
         });
-        recordAttemptTelemetry(state, result, fallbackStartedAt);
+        await recordAttemptTelemetry(workspaceDir, state, unitKey, result, fallbackStartedAt, fallback.runtime, fallbackModel);
         unit.lastOutcome = result.outcome;
       }
     }
@@ -595,7 +701,7 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     outputs: step.outputs.map(mapPath),
     tools: step.tools,
     allowed_tools: step.allowed_tools,
-    skills: step.skills,
+    skills: step.skills.map(mapPath),
     validators: step.validators,
     validator_commands: step.validator_commands,
     requires_human_approval: step.requires_human_approval,
@@ -901,15 +1007,15 @@ async function runLoopStage(
 
 /** One flow run per workspace: acquire the shared lock for the duration. */
 export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
-  await acquireFlowLock(opts.workspaceDir, opts.lockHolder ?? "cli");
+  const lock = await acquireFlowLock(opts.workspaceDir, opts.lockHolder ?? "cli");
   try {
     return await runFlowUnlocked(opts);
   } finally {
-    await releaseFlowLock(opts.workspaceDir);
+    await releaseFlowLock(opts.workspaceDir, lock);
   }
 }
 
-async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> {
+export async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> {
   const { workflow, workspaceDir } = opts;
 
   const mismatches = findCapabilityMismatches(workflow, opts.runtime.id);
@@ -919,6 +1025,12 @@ async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> {
       mismatches.map((m) => `  - ${m}`).join("\n"),
     );
   }
+
+  const health = await opts.runtime.checkAvailable();
+  if (!health.available) {
+    throw new Error(`Runtime "${opts.runtime.id}" is not available${health.detail ? `: ${health.detail}` : ""}`);
+  }
+  const runtimeMaxConcurrent = health.max_concurrent ?? Number.POSITIVE_INFINITY;
 
   let state = await loadFlowState(workspaceDir);
   if (state && state.workflowHash !== workflowHash(workflow)) {
@@ -938,8 +1050,6 @@ async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> {
 
   state.status = "running";
   await saveFlowState(workspaceDir, state);
-  const health = await opts.runtime.checkAvailable();
-  const runtimeMaxConcurrent = health.max_concurrent ?? Number.POSITIVE_INFINITY;
 
   for (const stage of workflow.stages) {
     const unit = state.units[stage.id];

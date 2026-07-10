@@ -7,7 +7,9 @@ import { runFlow } from "../src/lib/workflow/engine.js";
 import { superviseFlow, readSupervisorRecord } from "../src/lib/workflow/supervisor.js";
 import { acquireFlowLock, releaseFlowLock, FlowLockHeldError, readFlowLock } from "../src/lib/workflow/lock.js";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
+import { registerWorkerRuntime } from "../src/lib/workflow/runtimes/registry.js";
 import { readEvents } from "../src/lib/workflow/state.js";
+import { summarizeUsage } from "../src/commands/flow.js";
 import type { StageRunRequest, StageRunResult } from "../src/lib/workflow/runtimes/base.js";
 
 const tempDirs: string[] = [];
@@ -23,10 +25,10 @@ afterEach(async () => {
 describe("flow lock", () => {
   it("blocks a second live holder and releases cleanly", async () => {
     const ws = await makeWorkspace();
-    await acquireFlowLock(ws, "test-a");
-    // Same pid re-acquires (steals its own) rather than deadlocking.
-    await expect(acquireFlowLock(ws, "test-a-again")).resolves.toBeDefined();
-    await releaseFlowLock(ws);
+    const lock = await acquireFlowLock(ws, "test-a");
+    // The same PID is not re-entrant: each holder has an ownership token.
+    await expect(acquireFlowLock(ws, "test-a-again")).rejects.toBeInstanceOf(FlowLockHeldError);
+    await releaseFlowLock(ws, lock);
     expect(await readFlowLock(ws)).toBeNull();
   });
 
@@ -39,8 +41,9 @@ describe("flow lock", () => {
       JSON.stringify({ pid: 999999999, holder: "ghost", acquiredAt: "2026-01-01" }),
       "utf-8",
     );
-    await expect(acquireFlowLock(ws, "reclaimer")).resolves.toMatchObject({ holder: "reclaimer" });
-    await releaseFlowLock(ws);
+    const lock = await acquireFlowLock(ws, "reclaimer");
+    expect(lock).toMatchObject({ holder: "reclaimer" });
+    await releaseFlowLock(ws, lock);
   });
 });
 
@@ -138,6 +141,33 @@ describe("superviseFlow", () => {
     const resumed = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
     expect(resumed.status).toBe("completed");
   });
+
+  it("stops for a configured run limit instead of retrying it as quota", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      run_limits: { max_recorded_tokens: 10 },
+      stages: [
+        { id: "a", owner: "pm", outputs: ["a.md"] },
+        { id: "b", owner: "pm", outputs: ["b.md"] },
+      ],
+    });
+    const inner = new DryRunRuntime();
+    const runtime = {
+      id: "dry-run", capabilities: inner.capabilities, checkAvailable: () => inner.checkAvailable(),
+      async runStage(req: StageRunRequest): Promise<StageRunResult> {
+        return { ...(await inner.runStage(req)), usage: { total_tokens: 10 } };
+      },
+    };
+    const delays: number[] = [];
+    const state = await superviseFlow({
+      workflow: wf, workspaceDir: ws, runtime,
+      sleep: async (ms) => { delays.push(ms); },
+    });
+    expect(state.status).toBe("paused_blocker");
+    expect(delays).toEqual([]);
+    const record = await readSupervisorRecord(ws);
+    expect(record).toMatchObject({ blockerKind: "run_limit", retries: 0 });
+  });
 });
 
 describe("explicit quota fallback", () => {
@@ -179,5 +209,54 @@ describe("explicit quota fallback", () => {
     };
     const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: primary });
     expect(state.status).toBe("paused_blocker");
+  });
+
+  it("uses the fallback provider model rather than the primary tier model", async () => {
+    const ws = await makeWorkspace();
+    const fallbackId = "test-fallback-model";
+    let fallbackModel: string | undefined;
+    registerWorkerRuntime({
+      id: fallbackId,
+      capabilities: new DryRunRuntime().capabilities,
+      checkAvailable: () => new DryRunRuntime().checkAvailable(),
+      async runStage(req: StageRunRequest): Promise<StageRunResult> {
+        fallbackModel = req.model;
+        return new DryRunRuntime().runStage(req);
+      },
+    });
+    const wf = WorkflowDef.parse({
+      runtime_policy: {
+        primary: "dry-run",
+        fallback: [{ runtime: fallbackId, model: "fallback-model" }],
+        on_quota_exhausted: "try_fallback",
+      },
+      model_tiers: { primary: { runtime: "dry-run", model: "primary-model" } },
+      stages: [{ id: "a", owner: "pm", outputs: ["a.md"], model_tier: "primary" }],
+    });
+    const primary = {
+      id: "dry-run", capabilities: new DryRunRuntime().capabilities,
+      checkAvailable: () => new DryRunRuntime().checkAvailable(),
+      async runStage(): Promise<StageRunResult> {
+        return { outcome: "quota_exhausted", producedFiles: [], usage: { total_tokens: 7 } };
+      },
+    };
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: primary });
+    expect(state.status).toBe("completed");
+    expect(fallbackModel).toBe("fallback-model");
+    expect(state.units.a).toMatchObject({ requestedModel: "primary-model", actualModel: "fallback-model" });
+  });
+
+  it("includes quota-blocked attempt usage in the usage summary", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({ stages: [{ id: "a", owner: "pm", outputs: ["a.md"] }] });
+    const primary = {
+      id: "dry-run", capabilities: new DryRunRuntime().capabilities,
+      checkAvailable: () => new DryRunRuntime().checkAvailable(),
+      async runStage(): Promise<StageRunResult> {
+        return { outcome: "quota_exhausted", producedFiles: [], usage: { total_tokens: 123 } };
+      },
+    };
+    await runFlow({ workflow: wf, workspaceDir: ws, runtime: primary });
+    await expect(summarizeUsage(ws)).resolves.toMatchObject({ totalTokens: 123, unitsWithUsage: 1 });
   });
 });

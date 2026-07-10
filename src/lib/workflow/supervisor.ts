@@ -2,16 +2,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { WorkflowDef } from "../schema.js";
 import type { WorkerRuntime } from "./runtimes/base.js";
-import { runFlow } from "./engine.js";
-import { appendEvent, flowDir, type FlowState } from "./state.js";
-import { FlowLockHeldError } from "./lock.js";
+import { runFlowUnlocked } from "./engine.js";
+import { appendEvent, flowDir, readEvents, type FlowState } from "./state.js";
+import { acquireFlowLock, releaseFlowLock } from "./lock.js";
 
 /** Persistent flow supervision: keep retrying a resumable flow until it
  *  completes, fails, or hits the supervision deadline.
  *
  *  - blockers (quota etc.): delayed retry with exponential backoff
  *  - approvals: never auto-approved — poll and continue once a human acts
- *  - lock collisions (manual CLI/dashboard run in progress): wait politely
+ *  - one supervisor owns the workspace for its whole lifecycle; manual runs
+ *    receive a clear lock error instead of racing wake-ups
  *  - .malaclaw/flow/supervisor.json carries next-retry/blocker/history so
  *    the dashboard can display supervision state
  *
@@ -36,7 +37,7 @@ export type SuperviseOptions = {
 };
 
 export type SupervisorEvent = {
-  type: "run_finished" | "waiting_approval" | "retry_scheduled" | "lock_busy" | "deadline_reached";
+  type: "run_finished" | "waiting_approval" | "retry_scheduled" | "deadline_reached" | "stopped_run_limit";
   status?: FlowState["status"];
   delayMs?: number;
   attempt?: number;
@@ -47,6 +48,7 @@ export type SupervisorRecord = {
   startedAt: string;
   lastStatus?: string;
   blockerReason?: string;
+  blockerKind?: "quota_or_runtime" | "run_limit" | "approval";
   nextRetryAt?: string;
   retries: number;
   history: Array<{ at: string; status: string }>;
@@ -69,11 +71,16 @@ export async function readSupervisorRecord(workspaceDir: string): Promise<Superv
   }
 }
 
-async function latestBlockerReason(workspaceDir: string, state: FlowState): Promise<string | undefined> {
+async function latestBlocker(workspaceDir: string, state: FlowState): Promise<{ kind: "quota_or_runtime" | "run_limit"; reason?: string }> {
+  const events = await readEvents(workspaceDir);
+  const latest = [...events].reverse().find((event) => event.type === "run_limit_reached" || event.type === "flow_paused_blocker");
+  if (latest?.type === "run_limit_reached") {
+    return { kind: "run_limit", reason: typeof latest.reason === "string" ? latest.reason : "run limit reached" };
+  }
   const pendingKeys = Object.entries(state.units)
     .filter(([, unit]) => unit.status === "pending" && unit.lastOutcome)
     .map(([key, unit]) => `${key}: ${unit.lastOutcome}`);
-  return pendingKeys[0];
+  return { kind: "quota_or_runtime", reason: pendingKeys[0] };
 }
 
 export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> {
@@ -91,70 +98,96 @@ export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> 
   };
   let consecutiveBlocks = 0;
   let state: FlowState | undefined;
+  let hasRun = false;
 
-  for (;;) {
-    if (Date.now() > deadline) {
-      opts.onEvent?.({ type: "deadline_reached", status: state?.status });
-      await appendEvent(opts.workspaceDir, { type: "supervisor_deadline", status: state?.status });
-      break;
-    }
+  // Hold this lease across waits as well as worker execution. A second
+  // supervisor must fail fast rather than periodically waking and competing
+  // with the first one. Approval commands intentionally do not need this
+  // lease: they only update pending approvals in the saved flow state.
+  const lease = await acquireFlowLock(opts.workspaceDir, "supervisor");
 
-    try {
-      state = await runFlow({
+  try {
+    for (;;) {
+      // Always make the initial attempt, even when a very short test or CLI
+      // deadline elapsed during setup. Subsequent passes respect the bound.
+      if (hasRun && Date.now() > deadline) {
+        opts.onEvent?.({ type: "deadline_reached", status: state?.status });
+        await appendEvent(opts.workspaceDir, { type: "supervisor_deadline", status: state?.status });
+        break;
+      }
+
+      hasRun = true;
+      state = await runFlowUnlocked({
         workflow: opts.workflow,
         workspaceDir: opts.workspaceDir,
         runtime: opts.runtime,
         lockHolder: "supervisor",
       });
-    } catch (err) {
-      if (err instanceof FlowLockHeldError) {
-        // A manual run is in progress; wait and re-check rather than fight.
-        opts.onEvent?.({ type: "lock_busy" });
+
+      record.lastStatus = state.status;
+      record.history.push({ at: new Date().toISOString(), status: state.status });
+      opts.onEvent?.({ type: "run_finished", status: state.status });
+
+      if (state.status === "completed" || state.status === "failed") {
+        record.nextRetryAt = undefined;
+        record.blockerReason = undefined;
+        record.blockerKind = undefined;
+        await writeRecord(opts.workspaceDir, record);
+        return state;
+      }
+
+      if (state.status === "paused_for_approval") {
+        // Humans approve; the supervisor only waits.
+        record.blockerKind = "approval";
+        record.blockerReason = `awaiting approval: ${state.pendingApprovals.map((a) => a.id).join(", ")}`;
+        record.nextRetryAt = new Date(Date.now() + approvalPollMs).toISOString();
+        await writeRecord(opts.workspaceDir, record);
+        opts.onEvent?.({ type: "waiting_approval" });
+        consecutiveBlocks = 0;
         await sleep(approvalPollMs);
         continue;
       }
-      throw err;
-    }
 
-    record.lastStatus = state.status;
-    record.history.push({ at: new Date().toISOString(), status: state.status });
-    opts.onEvent?.({ type: "run_finished", status: state.status });
+      const blocker = await latestBlocker(opts.workspaceDir, state);
+      if (blocker.kind === "run_limit") {
+        // Limits are user-configured guardrails, not transient provider
+        // errors. Retrying with this supervisor's original workflow would
+        // never change the decision, so leave a durable, operator-actionable
+        // record and stop. Raising the limit then starting a new supervisor
+        // resumes completed work without reset.
+        record.blockerKind = "run_limit";
+        record.blockerReason = blocker.reason;
+        record.nextRetryAt = undefined;
+        await writeRecord(opts.workspaceDir, record);
+        await appendEvent(opts.workspaceDir, { type: "supervisor_stopped_run_limit", reason: blocker.reason });
+        opts.onEvent?.({ type: "stopped_run_limit", status: state.status });
+        return state;
+      }
 
-    if (state.status === "completed" || state.status === "failed") {
-      record.nextRetryAt = undefined;
-      record.blockerReason = undefined;
+      // paused_blocker (quota/rate-limit/runtime): exponential backoff, capped.
+      consecutiveBlocks += 1;
+      record.retries += 1;
+      const delayMs = Math.min(baseRetryMs * 2 ** (consecutiveBlocks - 1), maxRetryMs);
+      record.blockerKind = "quota_or_runtime";
+      record.blockerReason = blocker.reason;
+      record.nextRetryAt = new Date(Date.now() + delayMs).toISOString();
       await writeRecord(opts.workspaceDir, record);
-      return state;
+      await appendEvent(opts.workspaceDir, {
+        type: "supervisor_retry_scheduled",
+        delayMs,
+        retries: record.retries,
+        blocker: record.blockerReason,
+      });
+      opts.onEvent?.({ type: "retry_scheduled", delayMs, attempt: record.retries });
+      await sleep(delayMs);
     }
 
-    if (state.status === "paused_for_approval") {
-      // Humans approve; the supervisor only waits.
-      record.blockerReason = `awaiting approval: ${state.pendingApprovals.map((a) => a.id).join(", ")}`;
-      record.nextRetryAt = new Date(Date.now() + approvalPollMs).toISOString();
-      await writeRecord(opts.workspaceDir, record);
-      opts.onEvent?.({ type: "waiting_approval" });
-      consecutiveBlocks = 0;
-      await sleep(approvalPollMs);
-      continue;
-    }
-
-    // paused_blocker (quota etc.): exponential backoff, capped.
-    consecutiveBlocks += 1;
-    record.retries += 1;
-    const delayMs = Math.min(baseRetryMs * 2 ** (consecutiveBlocks - 1), maxRetryMs);
-    record.blockerReason = await latestBlockerReason(opts.workspaceDir, state);
-    record.nextRetryAt = new Date(Date.now() + delayMs).toISOString();
     await writeRecord(opts.workspaceDir, record);
-    await appendEvent(opts.workspaceDir, {
-      type: "supervisor_retry_scheduled",
-      delayMs,
-      retries: record.retries,
-      blocker: record.blockerReason,
-    });
-    opts.onEvent?.({ type: "retry_scheduled", delayMs, attempt: record.retries });
-    await sleep(delayMs);
+    // The initial run always produces a state unless the workflow is invalid;
+    // do not start new work after the supervisor deadline.
+    if (!state) throw new Error("Supervisor reached its deadline before the flow initialized");
+    return state;
+  } finally {
+    await releaseFlowLock(opts.workspaceDir, lease);
   }
-
-  await writeRecord(opts.workspaceDir, record);
-  return state ?? (await runFlow({ ...opts, lockHolder: "supervisor" }));
 }

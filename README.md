@@ -304,7 +304,7 @@ Still intentionally post-MVP:
 - arbitrary DAG scheduling,
 - automatic OS scheduler installation,
 - policy-based auto-approval,
-- full cost-budget enforcement and automatic fallback dispatch,
+- full dollar-cost budgeting (subscription quota remains provider-owned),
 - UI-first workflow authoring.
 
 ## Documentation

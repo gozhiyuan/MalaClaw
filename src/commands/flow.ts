@@ -84,6 +84,11 @@ export async function runFlowSupervise(opts: {
     process.exit(1);
   }
   const runtime = getWorkerRuntime(opts.runtime ?? resolved.workflow.runtime_policy?.primary ?? "dry-run");
+  const health = await runtime.checkAvailable();
+  if (!health.available) {
+    console.log(`✗ Runtime "${runtime.id}" is not available${health.detail ? `: ${health.detail}` : ""}`);
+    process.exit(1);
+  }
   const { superviseFlow } = await import("../lib/workflow/supervisor.js");
   console.log("Supervising flow (Ctrl-C leaves the flow paused and resumable)...");
   const state = await superviseFlow({
@@ -98,8 +103,6 @@ export async function runFlowSupervise(opts: {
         console.log(`⏳ blocked; retry #${event.attempt} in ${((event.delayMs ?? 0) / 60_000).toFixed(1)} min`);
       } else if (event.type === "waiting_approval") {
         console.log("⏸ awaiting human approval (malaclaw flow report)");
-      } else if (event.type === "lock_busy") {
-        console.log("… another run holds the workspace lock; waiting");
       } else if (event.type === "run_finished") {
         console.log(`→ flow status: ${event.status}`);
       } else if (event.type === "deadline_reached") {
@@ -170,7 +173,12 @@ export async function summarizeUsage(workspaceDir: string): Promise<{
 }> {
   const events = (await readEvents(workspaceDir)) as UsageEvent[];
   const summary = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, unitsWithUsage: 0 };
-  const USAGE_EVENTS = new Set(["unit_succeeded", "unit_validation_failed", "unit_attempt_failed"]);
+  // New event logs contain one usage event for every worker attempt, including
+  // quota/rate-limit pauses. Keep historical logs readable as a fallback.
+  const hasAttemptEvents = events.some((event) => event.type === "unit_attempt_finished");
+  const USAGE_EVENTS = hasAttemptEvents
+    ? new Set(["unit_attempt_finished"])
+    : new Set(["unit_succeeded", "unit_validation_failed", "unit_attempt_failed"]);
   for (const event of events) {
     if (!USAGE_EVENTS.has(event.type) || !event.usage) continue;
     summary.unitsWithUsage += 1;
