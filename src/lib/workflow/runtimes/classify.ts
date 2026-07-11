@@ -4,7 +4,9 @@ import { resolveWithin } from "../safe-paths.js";
 
 const PATTERNS: Array<[RegExp, StageRunOutcome]> = [
   [/rate.?limit|\b429\b|overloaded/i, "rate_limited"],
-  [/quota|credit balance|billing|usage limit/i, "quota_exhausted"],
+  // "session limit ... resets 2:50am" is Claude's plan-limit phrasing —
+  // learned in flagship3, where it burned retries as worker_error.
+  [/quota|credit balance|billing|usage limit|session limit|limit reached.*resets|hit your.*limit/i, "quota_exhausted"],
   [/permission.*(denied|required)|not allowed to use/i, "permission_blocked"],
   [/model.*(not found|unavailable|invalid)/i, "model_unavailable"],
 ];

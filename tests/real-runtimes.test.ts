@@ -260,3 +260,11 @@ describe.runIf(process.env.MALACLAW_REAL_RUNTIME_TESTS === "1")("claude-code (re
     expect(result.producedFiles).toEqual(["hello.md"]);
   }, 300_000);
 });
+
+describe("classifyCliFailure quota phrasings", () => {
+  it("treats Claude session-limit messages as quota_exhausted, not worker_error", () => {
+    expect(classifyCliFailure("You've hit your session limit · resets 2:50am (America/Los_Angeles)")).toBe("quota_exhausted");
+    expect(classifyCliFailure("usage limit reached, resets 9am")).toBe("quota_exhausted");
+    expect(classifyCliFailure("some ordinary crash")).not.toBe("quota_exhausted");
+  });
+});
