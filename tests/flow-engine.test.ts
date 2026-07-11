@@ -150,6 +150,18 @@ describe("runFlow", () => {
     expect(state.status).toBe("completed");
   });
 
+  it("resets same-hash completed state when explicitly requested", async () => {
+    const ws = await makeWorkspace();
+    const first = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(first.units.plan.attempts).toBe(1);
+    const reset = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime(), reset: true });
+    expect(reset.status).toBe("completed");
+    // A fresh state has one new attempt rather than returning the old state.
+    expect(reset.units.plan.attempts).toBe(1);
+    const events = await readEvents(ws);
+    expect(events.filter((event) => event.type === "flow_initialized")).toHaveLength(2);
+  });
+
   it("runs a foreach stage after a producer emits an item artifact", async () => {
     const ws = await makeWorkspace();
     const wf = WorkflowDef.parse({

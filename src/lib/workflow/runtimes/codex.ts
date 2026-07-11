@@ -14,12 +14,19 @@ export type CodexOptions = {
   extraArgs?: string[];
 };
 
-const MACOS_CODEX_APP_BIN = "/Applications/Codex.app/Contents/Resources/codex";
+// Known macOS bundle locations, newest first: the codex CLI ships inside
+// ChatGPT.app since late 2026; older installs used a standalone Codex.app.
+const MACOS_CODEX_APP_BINS = [
+  "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "/Applications/Codex.app/Contents/Resources/codex",
+];
 
 function defaultCodexBin(): string {
   const envBin = process.env.MALACLAW_CODEX_BIN?.trim();
   if (envBin) return envBin;
-  if (fs.existsSync(MACOS_CODEX_APP_BIN)) return MACOS_CODEX_APP_BIN;
+  for (const bin of MACOS_CODEX_APP_BINS) {
+    if (fs.existsSync(bin)) return bin;
+  }
   return "codex";
 }
 

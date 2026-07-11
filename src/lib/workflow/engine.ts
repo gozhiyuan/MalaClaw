@@ -1032,7 +1032,10 @@ export async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> 
   }
   const runtimeMaxConcurrent = health.max_concurrent ?? Number.POSITIVE_INFINITY;
 
-  let state = await loadFlowState(workspaceDir);
+  // --reset is an explicit user request to start the whole graph again. It
+  // must not depend on a manifest-hash change; otherwise a stopped or
+  // partially completed run cannot re-execute corrected deterministic stages.
+  let state = opts.reset ? null : await loadFlowState(workspaceDir);
   if (state && state.workflowHash !== workflowHash(workflow)) {
     if (!opts.reset) {
       throw new Error(
