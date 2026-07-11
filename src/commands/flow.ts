@@ -1,7 +1,7 @@
 import { loadManifest } from "../lib/loader.js";
 import { resolveManifest } from "../lib/resolver.js";
 import { readEvents } from "../lib/workflow/state.js";
-import { runFlow, approveFlow, approveAllFlow, getFlowStatus } from "../lib/workflow/engine.js";
+import { runFlow, approveFlow, approveAllFlow, getFlowStatus, retryFailedFlow } from "../lib/workflow/engine.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
 import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
 
@@ -47,6 +47,16 @@ export async function runFlowApprove(approvalId: string): Promise<void> {
 export async function runFlowReviewBatch(): Promise<void> {
   const state = await approveAllFlow(process.cwd());
   console.log("✓ Approved all pending review items");
+  printState(state);
+}
+
+export async function runFlowRetry(): Promise<void> {
+  const before = await getFlowStatus(process.cwd());
+  const retried = before
+    ? Object.entries(before.units).filter(([, unit]) => unit.status === "failed").map(([key]) => key)
+    : [];
+  const state = await retryFailedFlow(process.cwd());
+  console.log(`✓ Reset failed unit(s) for retry: ${retried.join(", ")}`);
   printState(state);
 }
 

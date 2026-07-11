@@ -397,6 +397,14 @@ flow
   });
 
 flow
+  .command("retry")
+  .description("Reset failed units to pending without resetting completed workflow work")
+  .action(async () => {
+    const { runFlowRetry } = await import("./commands/flow.js");
+    await runFlowRetry();
+  });
+
+flow
   .command("supervise")
   .description("Keep retrying a resumable flow: backoff on blockers, poll on approvals (never auto-approves). Foreground; use nohup/tmux to detach.")
   .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")

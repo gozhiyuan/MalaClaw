@@ -168,3 +168,17 @@ describe("owner role injection", () => {
     expect(prompts.get("build")).not.toContain("acting as the");
   });
 });
+
+describe("corrupt state protection", () => {
+  it("throws on an unparseable state file instead of silently re-initializing", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({ stages: [{ id: "a", owner: "pm", outputs: ["a.md"] }] });
+    await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    const statePath = path.join(ws, ".malaclaw", "flow", "state.json");
+    const state = JSON.parse(await fs.readFile(statePath, "utf-8"));
+    state.units.a.lastOutcome = null; // the exact hand-edit that bit flagship3
+    await fs.writeFile(statePath, JSON.stringify(state), "utf-8");
+    await expect(runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() }))
+      .rejects.toThrow(/refusing to silently reinitialize/);
+  });
+});

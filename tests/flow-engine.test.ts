@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { WorkflowDef } from "../src/lib/schema.js";
-import { runFlow, approveFlow, getFlowStatus } from "../src/lib/workflow/engine.js";
+import { runFlow, approveFlow, getFlowStatus, retryFailedFlow } from "../src/lib/workflow/engine.js";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
 import { readEvents } from "../src/lib/workflow/state.js";
 
@@ -66,6 +66,34 @@ describe("runFlow", () => {
       path.join(ws, ".malaclaw/flow/prompts/plan-attempt2.md"), "utf-8");
     expect(prompt2).toContain("Previous attempt failed");
     expect(prompt2).toContain("unknown_gate");
+  });
+
+  it("explicitly retries failed units without resetting completed work", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "plan", owner: "pm", outputs: ["plan.md"] },
+        { id: "build", owner: "pm", inputs: ["plan.md"], outputs: ["result.md"], retry: { max_attempts: 1 } },
+      ],
+    });
+    const failed = await runFlow({
+      workflow: wf, workspaceDir: ws,
+      runtime: new DryRunRuntime({ outcomes: { build: ["worker_error"] } }),
+    });
+    expect(failed.status).toBe("failed");
+    expect(failed.units.plan.status).toBe("succeeded");
+    expect(failed.units.build.status).toBe("failed");
+
+    const reset = await retryFailedFlow(ws);
+    expect(reset.status).toBe("idle");
+    expect(reset.units.plan.status).toBe("succeeded");
+    expect(reset.units.build).toMatchObject({ status: "pending", attempts: 0 });
+
+    const completed = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(completed.status).toBe("completed");
+    const events = await readEvents(ws);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "plan")).toHaveLength(1);
+    expect(events.some((event) => event.type === "flow_retry_requested")).toBe(true);
   });
 
   it("pauses at an approval gate, then resumes after approveFlow", async () => {

@@ -1141,6 +1141,34 @@ export async function approveAllFlow(workspaceDir: string): Promise<FlowState> {
   return state;
 }
 
+/**
+ * An explicit operator retry is different from a workflow reset: preserve all
+ * succeeded units and artifacts, but make only exhausted failed units runnable
+ * again. This is for cleared external conditions such as a repaired runtime,
+ * restored credentials, or a sandbox/permission failure.
+ */
+export async function retryFailedFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  if (state.status !== "failed") {
+    throw new Error(`Flow is ${state.status}; only a failed flow needs an explicit retry.`);
+  }
+  const retried: string[] = [];
+  for (const [key, unit] of Object.entries(state.units)) {
+    if (unit.status !== "failed") continue;
+    unit.status = "pending";
+    unit.attempts = 0;
+    delete unit.lastOutcome;
+    delete unit.lastError;
+    retried.push(key);
+  }
+  if (retried.length === 0) throw new Error("Flow is failed but has no failed units to retry.");
+  state.status = "idle";
+  await appendEvent(workspaceDir, { type: "flow_retry_requested", keys: retried });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
 export async function getFlowStatus(workspaceDir: string): Promise<FlowState | null> {
   return loadFlowState(workspaceDir);
 }

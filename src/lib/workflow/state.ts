@@ -103,12 +103,24 @@ export async function saveFlowState(workspaceDir: string, state: FlowState): Pro
   await fs.writeFile(statePath(workspaceDir), JSON.stringify(state, null, 2), "utf-8");
 }
 
+/** Missing state = fresh workspace (null). A PRESENT but unparseable state
+ *  file is corruption and throws loudly — silently re-initializing wiped a
+ *  live flagship run's unit records after a hand-edit introduced nulls. */
 export async function loadFlowState(workspaceDir: string): Promise<FlowState | null> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(statePath(workspaceDir), "utf-8");
-    return FlowState.parse(JSON.parse(raw));
+    raw = await fs.readFile(statePath(workspaceDir), "utf-8");
   } catch {
     return null;
+  }
+  try {
+    return FlowState.parse(JSON.parse(raw));
+  } catch (err) {
+    throw new Error(
+      `Flow state exists but is invalid (${statePath(workspaceDir)}): ` +
+      `${err instanceof Error ? err.message.split("\n")[0] : String(err)}. ` +
+      "Fix or remove the file explicitly — refusing to silently reinitialize.",
+    );
   }
 }
 
