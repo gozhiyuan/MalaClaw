@@ -93,6 +93,35 @@ describe("superviseFlow", () => {
     expect(events.filter((e) => e.type === "supervisor_retry_scheduled")).toHaveLength(2);
   });
 
+  it("honors a provider reset hint instead of capping it at exponential backoff", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({ stages: [{ id: "a", owner: "pm", outputs: ["a.md"] }] });
+    const inner = new DryRunRuntime();
+    let calls = 0;
+    const runtime = {
+      id: "dry-run",
+      capabilities: inner.capabilities,
+      checkAvailable: () => inner.checkAvailable(),
+      async runStage(req: StageRunRequest): Promise<StageRunResult> {
+        calls += 1;
+        if (calls === 1) return { outcome: "quota_exhausted", producedFiles: [], retryAfterMs: 4 * 60 * 60_000 };
+        return inner.runStage(req);
+      },
+    };
+    const delays: number[] = [];
+    const completed = await superviseFlow({
+      workflow: wf,
+      workspaceDir: ws,
+      runtime,
+      baseRetryMs: 100,
+      maxRetryMs: 150,
+      sleep: async (ms) => { delays.push(ms); },
+    });
+    expect(completed.status).toBe("completed");
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThan(3 * 60 * 60_000);
+  });
+
   it("waits on approvals without auto-approving, then continues after a human acts", async () => {
     const ws = await makeWorkspace();
     const wf = WorkflowDef.parse({

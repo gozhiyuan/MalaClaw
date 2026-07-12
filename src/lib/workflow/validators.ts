@@ -76,7 +76,10 @@ const builtins: Record<string, ValidatorFn> = {
 };
 
 function outputLines(value: string): string[] {
-  return value.split("\n").map((line) => line.trim()).filter(Boolean);
+  // Node runtime chatter (ExperimentalWarning etc.) is not a finding.
+  return value.split("\n").map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\(node:\d+\)|^\(Use `node --trace/.test(line));
 }
 
 function commandLabel(command: WorkflowCommand): string {

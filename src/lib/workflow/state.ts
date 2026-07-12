@@ -11,6 +11,7 @@ export const UnitState = z.object({
   rounds: z.number().int().default(0),
   lastOutcome: StageRunOutcome.optional(),
   lastError: z.string().optional(),
+  retryAt: z.string().datetime().optional(),
   requestedRuntime: z.string().optional(),
   actualRuntime: z.string().optional(),
   requestedModel: z.string().optional(),

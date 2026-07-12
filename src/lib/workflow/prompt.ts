@@ -6,6 +6,7 @@ export type PromptUnit = {
   outputs: string[];
   tools: string[];
   allowed_tools?: string[];
+  instructions?: string[];
   validators: string[];
   validator_commands?: Array<{ cmd: string; args: string[] }>;
 };
@@ -45,6 +46,7 @@ export function renderUnitPrompt(ctx: PromptContext): string {
   prompt += section("Required outputs", stage.outputs);
   prompt += section("Tools you may reference", stage.tools);
   prompt += section("Harness tools granted for this stage", stage.allowed_tools ?? []);
+  prompt += section("Stage-specific instructions (non-negotiable)", stage.instructions ?? []);
   prompt += section("Structured output contract (MUST be satisfied exactly)", contractNotes ?? []);
   prompt += section("Validators that will check your outputs", stage.validators);
   prompt += section(

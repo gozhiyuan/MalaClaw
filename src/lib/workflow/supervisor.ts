@@ -71,7 +71,7 @@ export async function readSupervisorRecord(workspaceDir: string): Promise<Superv
   }
 }
 
-async function latestBlocker(workspaceDir: string, state: FlowState): Promise<{ kind: "quota_or_runtime" | "run_limit"; reason?: string }> {
+async function latestBlocker(workspaceDir: string, state: FlowState): Promise<{ kind: "quota_or_runtime" | "run_limit"; reason?: string; retryAt?: string }> {
   const events = await readEvents(workspaceDir);
   const latest = [...events].reverse().find((event) => event.type === "run_limit_reached" || event.type === "flow_paused_blocker");
   if (latest?.type === "run_limit_reached") {
@@ -79,8 +79,8 @@ async function latestBlocker(workspaceDir: string, state: FlowState): Promise<{ 
   }
   const pendingKeys = Object.entries(state.units)
     .filter(([, unit]) => unit.status === "pending" && unit.lastOutcome)
-    .map(([key, unit]) => `${key}: ${unit.lastOutcome}`);
-  return { kind: "quota_or_runtime", reason: pendingKeys[0] };
+    .map(([key, unit]) => ({ reason: `${key}: ${unit.lastOutcome}`, retryAt: unit.retryAt }));
+  return { kind: "quota_or_runtime", reason: pendingKeys[0]?.reason, retryAt: pendingKeys[0]?.retryAt };
 }
 
 export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> {
@@ -107,6 +107,9 @@ export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> 
   const lease = await acquireFlowLock(opts.workspaceDir, "supervisor");
 
   try {
+    // Replace a stale record immediately so operator-brief names the current
+    // detached PID even while the first worker attempt is still running.
+    await writeRecord(opts.workspaceDir, record);
     for (;;) {
       // Always make the initial attempt, even when a very short test or CLI
       // deadline elapsed during setup. Subsequent passes respect the bound.
@@ -164,10 +167,15 @@ export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> 
         return state;
       }
 
-      // paused_blocker (quota/rate-limit/runtime): exponential backoff, capped.
+      // Prefer a provider-reported reset timestamp. Capped exponential backoff
+      // remains the safe fallback for generic quota/runtime failures.
       consecutiveBlocks += 1;
       record.retries += 1;
-      const delayMs = Math.min(baseRetryMs * 2 ** (consecutiveBlocks - 1), maxRetryMs);
+      const providerDelay = blocker.retryAt ? Date.parse(blocker.retryAt) - Date.now() : Number.NaN;
+      const exponentialDelay = Math.min(baseRetryMs * 2 ** (consecutiveBlocks - 1), maxRetryMs);
+      const delayMs = Number.isFinite(providerDelay) && providerDelay > 0
+        ? Math.min(providerDelay, Math.max(0, deadline - Date.now()))
+        : exponentialDelay;
       record.blockerKind = "quota_or_runtime";
       record.blockerReason = blocker.reason;
       record.nextRetryAt = new Date(Date.now() + delayMs).toISOString();
@@ -177,6 +185,7 @@ export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> 
         delayMs,
         retries: record.retries,
         blocker: record.blockerReason,
+        retry_at: blocker.retryAt,
       });
       opts.onEvent?.({ type: "retry_scheduled", delayMs, attempt: record.retries });
       await sleep(delayMs);

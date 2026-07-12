@@ -20,6 +20,23 @@ export function classifyCliFailure(text: string): StageRunOutcome {
   return "worker_error";
 }
 
+/** Parse common harness messages such as "try again at 8:04 PM" and
+ * "session limit resets 2:50am". A date-less provider clock is interpreted
+ * locally and moved to tomorrow when today's occurrence has passed. */
+export function quotaRetryAfterMs(text: string, now = new Date()): number | undefined {
+  const match = text.match(/(?:try again|resets?(?:\s+at)?|reset(?:\s+at)?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (!match) return undefined;
+  const hour12 = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const meridiem = match[3].toLowerCase();
+  if (hour12 < 1 || hour12 > 12 || minute > 59) return undefined;
+  const reset = new Date(now);
+  reset.setHours((hour12 % 12) + (meridiem === "pm" ? 12 : 0), minute, 0, 0);
+  if (reset.getTime() <= now.getTime() + 30_000) reset.setDate(reset.getDate() + 1);
+  const delay = reset.getTime() - now.getTime();
+  return delay > 0 && delay <= 26 * 60 * 60_000 ? delay : undefined;
+}
+
 /** The contract check: which declared concrete outputs actually exist.
  *  Globs/templates are skipped (validated elsewhere); unsafe paths never pass. */
 export async function collectProducedFiles(

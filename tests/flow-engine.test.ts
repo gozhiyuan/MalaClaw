@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { WorkflowDef } from "../src/lib/schema.js";
-import { runFlow, approveFlow, getFlowStatus, retryFailedFlow } from "../src/lib/workflow/engine.js";
+import { runFlow, approveFlow, getFlowStatus, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../src/lib/workflow/engine.js";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
 import { readEvents } from "../src/lib/workflow/state.js";
 
@@ -94,6 +94,40 @@ describe("runFlow", () => {
     const events = await readEvents(ws);
     expect(events.filter((event) => event.type === "unit_started" && event.key === "plan")).toHaveLength(1);
     expect(events.some((event) => event.type === "flow_retry_requested")).toBe(true);
+  });
+
+  it("migrates an additive workflow update without resetting completed units", async () => {
+    const ws = await makeWorkspace();
+    const completed = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(completed.status).toBe("completed");
+    const expanded = WorkflowDef.parse({
+      stages: [...simpleWf.stages, { id: "final_validate", owner: "pm", inputs: ["result.md"], outputs: ["validation.md"] }],
+    });
+    const migrated = await migrateFlow(ws, expanded);
+    expect(migrated.status).toBe("idle");
+    expect(migrated.units.plan.status).toBe("succeeded");
+    expect(migrated.units.final_validate.status).toBe("pending");
+
+    const resumed = await runFlow({ workflow: expanded, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(resumed.status).toBe("completed");
+    await fs.access(path.join(ws, "validation.md"));
+    const events = await readEvents(ws);
+    expect(events.some((event) => event.type === "flow_migrated")).toBe(true);
+  });
+
+  it("reopens a selected top-level stage and downstream work only", async () => {
+    const ws = await makeWorkspace();
+    await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    const reopened = await reopenFlowFrom(ws, simpleWf, "build");
+    expect(reopened.units.plan.status).toBe("succeeded");
+    expect(reopened.units.build.status).toBe("pending");
+
+    const completed = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(completed.status).toBe("completed");
+    const events = await readEvents(ws);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "plan")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "build")).toHaveLength(2);
+    expect(events.some((event) => event.type === "flow_reopened" && event.from_stage === "build")).toBe(true);
   });
 
   it("pauses at an approval gate, then resumes after approveFlow", async () => {

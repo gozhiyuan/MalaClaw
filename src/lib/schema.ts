@@ -330,6 +330,9 @@ const workUnitFields = {
   allowed_tools: z.array(z.string().min(1)).default([]),
   // Workspace-relative skill documents injected into the stage prompt.
   skills: z.array(workspacePath).default([]),
+  // Non-negotiable, stage-local instructions. Keep these structured instead
+  // of smuggling contracts into owner personas shared by unrelated stages.
+  instructions: z.array(z.string().min(1)).default([]),
   validators: z.array(z.string()).default([]),
   validator_commands: z.array(WorkflowCommand).default([]),
   requires_human_approval: z.boolean().default(false),

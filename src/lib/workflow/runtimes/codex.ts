@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
 import { CLI_HARNESS_CAPABILITIES } from "./base.js";
-import { classifyCliFailure, collectProducedFiles } from "./classify.js";
+import { classifyCliFailure, collectProducedFiles, quotaRetryAfterMs } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
 
 export type CodexOptions = {
@@ -111,11 +111,13 @@ export class CodexRuntime implements WorkerRuntime {
         usage: totalTokens !== undefined ? { total_tokens: totalTokens } : undefined,
       };
     }
+    const outcome = classifyCliFailure(result.output);
     return {
-      outcome: classifyCliFailure(result.output),
+      outcome,
       producedFiles: [],
       message: result.output.slice(0, 500),
       logRef: logPath,
+      ...(outcome === "quota_exhausted" ? { retryAfterMs: quotaRetryAfterMs(result.output) } : {}),
     };
   }
 }

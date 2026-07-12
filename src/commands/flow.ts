@@ -1,7 +1,8 @@
 import { loadManifest } from "../lib/loader.js";
+import { spawn } from "node:child_process";
 import { resolveManifest } from "../lib/resolver.js";
 import { readEvents } from "../lib/workflow/state.js";
-import { runFlow, approveFlow, approveAllFlow, getFlowStatus, retryFailedFlow } from "../lib/workflow/engine.js";
+import { runFlow, approveFlow, approveAllFlow, getFlowStatus, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../lib/workflow/engine.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
 import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
 
@@ -60,6 +61,37 @@ export async function runFlowRetry(): Promise<void> {
   printState(state);
 }
 
+export async function runFlowMigrate(): Promise<void> {
+  const workspaceDir = process.cwd();
+  const manifest = await loadManifest(workspaceDir);
+  const resolved = await resolveManifest(manifest, { projectDir: workspaceDir });
+  if (!resolved.workflow) {
+    console.log("No workflow: section in malaclaw.yaml — nothing to migrate.");
+    process.exit(1);
+  }
+  const state = await migrateFlow(workspaceDir, resolved.workflow);
+  console.log("✓ Flow state migrated to the current workflow definition");
+  printState(state);
+}
+
+export async function runFlowReopen(stageId: string): Promise<void> {
+  const workspaceDir = process.cwd();
+  const manifest = await loadManifest(workspaceDir);
+  const resolved = await resolveManifest(manifest, { projectDir: workspaceDir });
+  if (!resolved.workflow) {
+    console.log("No workflow: section in malaclaw.yaml — nothing to reopen.");
+    process.exit(1);
+  }
+  const state = await reopenFlowFrom(workspaceDir, resolved.workflow, stageId);
+  console.log(`✓ Reopened ${stageId} and downstream stages`);
+  printState(state);
+}
+
+export async function runFlowOperatorBrief(): Promise<void> {
+  const { renderOperatorBrief } = await import("../lib/workflow/operator-brief.js");
+  process.stdout.write(await renderOperatorBrief(process.cwd()));
+}
+
 export async function runFlowReport(): Promise<void> {
   const state = await getFlowStatus(process.cwd());
   if (!state || state.pendingApprovals.length === 0) {
@@ -85,6 +117,7 @@ export async function runFlowSupervise(opts: {
   retryMinutes: number;
   maxRetryMinutes: number;
   maxHours: number;
+  detach?: boolean;
 }): Promise<void> {
   const workspaceDir = process.cwd();
   const manifest = await loadManifest(workspaceDir);
@@ -98,6 +131,26 @@ export async function runFlowSupervise(opts: {
   if (!health.available) {
     console.log(`✗ Runtime "${runtime.id}" is not available${health.detail ? `: ${health.detail}` : ""}`);
     process.exit(1);
+  }
+  if (opts.detach) {
+    // A detached Node child survives the invoking terminal/tool process. The
+    // child deliberately runs the normal foreground supervisor, so there is
+    // one implementation of retry/approval semantics and one lock owner.
+    const child = spawn(
+      process.execPath,
+      [
+        process.argv[1], "flow", "supervise",
+        "--runtime", runtime.id,
+        "--retry-minutes", String(opts.retryMinutes),
+        "--max-retry-minutes", String(opts.maxRetryMinutes),
+        "--max-hours", String(opts.maxHours),
+      ],
+      { cwd: workspaceDir, detached: true, stdio: "ignore", env: process.env },
+    );
+    child.unref();
+    console.log(`✓ Started detached supervisor (pid ${child.pid ?? "unknown"})`);
+    console.log("Check with: malaclaw flow operator-brief");
+    return;
   }
   const { superviseFlow } = await import("../lib/workflow/supervisor.js");
   console.log("Supervising flow (Ctrl-C leaves the flow paused and resumable)...");

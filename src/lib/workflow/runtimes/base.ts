@@ -49,6 +49,9 @@ export type StageRunResult = {
   producedFiles: string[];
   message?: string;
   logRef?: string;
+  /** Provider-reported wait before a quota retry, when a concrete reset time
+   * can be parsed from the CLI failure output. */
+  retryAfterMs?: number;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;

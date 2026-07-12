@@ -16,6 +16,7 @@ describe("WorkflowStage schema", () => {
     expect(stage.optional_inputs).toEqual([]);
     expect(stage.outputs).toEqual([]);
     expect(stage.tools).toEqual([]);
+    expect(stage.instructions).toEqual([]);
     expect(stage.validators).toEqual([]);
     expect(stage.validator_commands).toEqual([]);
     expect(stage.requires_human_approval).toBe(false);
@@ -30,6 +31,7 @@ describe("WorkflowStage schema", () => {
       inputs: ["outline.md"],
       outputs: ["chapters/*.md"],
       tools: ["web_search"],
+      instructions: ["Cite only packet-backed evidence."],
       validators: ["required_output_exists", "citation_markers_present"],
       validator_commands: [{ cmd: "longwrite", args: ["validate", "research", "."] }],
       requires_human_approval: true,
@@ -40,6 +42,7 @@ describe("WorkflowStage schema", () => {
     expect(stage.retry?.max_attempts).toBe(3);
     expect(stage.max_rounds).toBe(5);
     expect(stage.validator_commands[0].args).toContain("research");
+    expect(stage.instructions).toEqual(["Cite only packet-backed evidence."]);
   });
 
   it("defaults retry.max_attempts to 2 when retry block is present but empty", () => {

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ClaudeCodeRuntime } from "../src/lib/workflow/runtimes/claude-code.js";
 import { CodexRuntime, parseCodexTokensUsed } from "../src/lib/workflow/runtimes/codex.js";
-import { classifyCliFailure, collectProducedFiles } from "../src/lib/workflow/runtimes/classify.js";
+import { classifyCliFailure, collectProducedFiles, quotaRetryAfterMs } from "../src/lib/workflow/runtimes/classify.js";
 import { runSubprocess } from "../src/lib/workflow/runtimes/subprocess.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../src/lib/workflow/runtimes/registry.js";
 
@@ -266,5 +266,12 @@ describe("classifyCliFailure quota phrasings", () => {
     expect(classifyCliFailure("You've hit your session limit · resets 2:50am (America/Los_Angeles)")).toBe("quota_exhausted");
     expect(classifyCliFailure("usage limit reached, resets 9am")).toBe("quota_exhausted");
     expect(classifyCliFailure("some ordinary crash")).not.toBe("quota_exhausted");
+  });
+
+  it("parses provider reset clocks for quota-aware supervision", () => {
+    const now = new Date("2026-07-11T17:00:00");
+    expect(quotaRetryAfterMs("You've hit your usage limit. Try again at 8:04 PM.", now)).toBe(11_040_000);
+    expect(quotaRetryAfterMs("session limit resets 2:50am", now)).toBeGreaterThan(0);
+    expect(quotaRetryAfterMs("usage limit reached", now)).toBeUndefined();
   });
 });

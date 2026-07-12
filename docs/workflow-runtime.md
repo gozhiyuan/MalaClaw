@@ -467,6 +467,40 @@ and usage telemetry inspectable per pass. The loop's own unit records completed
 rounds, and the stop condition is evaluated after each complete child-stage
 sequence.
 
+## Repairing a Completed Prefix
+
+When a validator or artifact contract changes, preserve earlier successful work
+and explicitly reopen a top-level stage plus everything after it:
+
+```bash
+malaclaw flow migrate       # required after an additive manifest change
+malaclaw flow reopen quality_loop
+malaclaw flow supervise --runtime codex
+```
+
+`reopen` is narrower than `--reset`: it intentionally re-incurs runtime cost
+only from the named stage forward. It refuses to alter a running flow.
+
+For an unattended local run, use the built-in detached launcher instead of
+depending on a terminal child process:
+
+```bash
+malaclaw flow supervise --runtime codex --detach
+malaclaw flow operator-brief
+```
+
+## Stage Instructions
+
+Use `instructions` for non-negotiable, stage-local constraints that belong in
+the rendered worker contract rather than a shared agent persona:
+
+```yaml
+- id: evidence_revision
+  owner: editor
+  instructions:
+    - Cite only evidence packet chunks as [source:<id>:p<paragraph>].
+```
+
 ## Smoke/Eval
 
 Use smoke-runtime before expensive demos:

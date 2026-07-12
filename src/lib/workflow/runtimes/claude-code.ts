@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "./base.js";
 import { CLI_HARNESS_CAPABILITIES } from "./base.js";
-import { classifyCliFailure, collectProducedFiles } from "./classify.js";
+import { classifyCliFailure, collectProducedFiles, quotaRetryAfterMs } from "./classify.js";
 import { runSubprocess } from "./subprocess.js";
 
 export type ClaudeCodeOptions = {
@@ -113,11 +113,13 @@ export class ClaudeCodeRuntime implements WorkerRuntime {
     }
 
     const failureText = parsed?.result ?? result.output;
+    const outcome = classifyCliFailure(failureText);
     return {
-      outcome: classifyCliFailure(failureText),
+      outcome,
       producedFiles: [],
       message: failureText.slice(0, 500),
       logRef: logPath,
+      ...(outcome === "quota_exhausted" ? { retryAfterMs: quotaRetryAfterMs(failureText) } : {}),
     };
   }
 }

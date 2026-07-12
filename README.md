@@ -311,6 +311,7 @@ Still intentionally post-MVP:
 
 - [docs/getting-started.md](./docs/getting-started.md)
 - [docs/workflow-runtime.md](./docs/workflow-runtime.md)
+- [docs/patterns/operator-goal-loop.md](./docs/patterns/operator-goal-loop.md)
 - [docs/local-development.md](./docs/local-development.md)
 - [docs/repo-workflow.md](./docs/repo-workflow.md)
 - [docs/how-it-works.md](./docs/how-it-works.md)

@@ -405,12 +405,37 @@ flow
   });
 
 flow
+  .command("migrate")
+  .description("Adopt an additive workflow update without resetting completed units")
+  .action(async () => {
+    const { runFlowMigrate } = await import("./commands/flow.js");
+    await runFlowMigrate();
+  });
+
+flow
+  .command("reopen <stageId>")
+  .description("Re-run a top-level stage and downstream work without resetting earlier stages")
+  .action(async (stageId) => {
+    const { runFlowReopen } = await import("./commands/flow.js");
+    await runFlowReopen(stageId);
+  });
+
+flow
+  .command("operator-brief")
+  .description("Print a provider-neutral status brief for a human or an operator loop")
+  .action(async () => {
+    const { runFlowOperatorBrief } = await import("./commands/flow.js");
+    await runFlowOperatorBrief();
+  });
+
+flow
   .command("supervise")
   .description("Keep retrying a resumable flow: backoff on blockers, poll on approvals (never auto-approves). Foreground; use nohup/tmux to detach.")
   .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")
   .option("--retry-minutes <n>", "Base delay before retrying a blocked flow", "5")
   .option("--max-retry-minutes <n>", "Backoff cap", "60")
   .option("--max-hours <n>", "Supervision deadline; the flow stays paused after it", "168")
+  .option("--detach", "Run the supervisor as an independent background process")
   .action(async (opts) => {
     const { runFlowSupervise } = await import("./commands/flow.js");
     await runFlowSupervise({
@@ -418,6 +443,7 @@ flow
       retryMinutes: Number(opts.retryMinutes),
       maxRetryMinutes: Number(opts.maxRetryMinutes),
       maxHours: Number(opts.maxHours),
+      detach: Boolean(opts.detach),
     });
   });
 

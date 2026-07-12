@@ -19,6 +19,7 @@ import {
   logsDir,
   saveFlowState,
   workflowHash,
+  UnitState,
   type FlowState,
 } from "./state.js";
 import { expandForeachItems, resolveItemTemplates } from "./foreach.js";
@@ -66,6 +67,7 @@ export type WorkUnitSpec = {
   outputs: string[];
   tools: string[];
   allowed_tools: string[];
+  instructions: string[];
   skills: string[];
   validators: string[];
   validator_commands: WorkflowCommand[];
@@ -575,12 +577,18 @@ async function runUnit(
     if (PAUSE_OUTCOMES.has(result.outcome)) {
       unit.status = "pending"; // re-runnable once the blocker clears
       unit.attempts -= 1; // the blocked attempt does not count
+      if (result.retryAfterMs !== undefined) {
+        unit.retryAt = new Date(Date.now() + result.retryAfterMs).toISOString();
+      } else {
+        delete unit.retryAt;
+      }
       await writeBlocker(workspaceDir, unitKey, result);
       await appendEvent(workspaceDir, { type: "flow_paused_blocker", key: unitKey, outcome: result.outcome });
       return "paused";
     }
 
     if (result.outcome === "success") {
+      delete unit.retryAt;
       const report = await runValidators(spec.validators, spec.outputs, workspaceDir, spec.validator_commands);
       await appendValidationReport(workspaceDir, unitKey, report.findings, report.pass);
       if (report.pass) {
@@ -675,6 +683,7 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     outputs: stage.outputs,
     tools: stage.tools,
     allowed_tools: stage.allowed_tools,
+    instructions: stage.instructions,
     skills: stage.skills,
     validators: stage.validators,
     validator_commands: stage.validator_commands,
@@ -701,6 +710,7 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     outputs: step.outputs.map(mapPath),
     tools: step.tools,
     allowed_tools: step.allowed_tools,
+    instructions: step.instructions,
     skills: step.skills.map(mapPath),
     validators: step.validators,
     validator_commands: step.validator_commands,
@@ -953,6 +963,18 @@ async function runLoopStage(
       await saveFlowState(opts.workspaceDir, state);
 
       if (outcome === "failed") {
+        // A child that exhausts retries (typically validation) fails the
+        // WHOLE flow only when no rounds remain — otherwise the next round
+        // is the retry: findings are already in reports/validation.md and
+        // routing, where the reviser reads them. Flagship3 lesson: rebuild
+        // sits after revise, so its feedback must flow forward, not abort.
+        if (unit.rounds + 1 < stage.max_rounds) {
+          await appendEvent(opts.workspaceDir, {
+            type: "loop_child_failed_continuing", key: scoped.id,
+            round: roundNumber, remainingRounds: stage.max_rounds - unit.rounds - 1,
+          });
+          break; // end this round; the round-complete logic advances the loop
+        }
         unit.status = "failed";
         return "failed";
       }
@@ -1160,11 +1182,77 @@ export async function retryFailedFlow(workspaceDir: string): Promise<FlowState> 
     unit.attempts = 0;
     delete unit.lastOutcome;
     delete unit.lastError;
+    delete unit.retryAt;
     retried.push(key);
   }
   if (retried.length === 0) throw new Error("Flow is failed but has no failed units to retry.");
   state.status = "idle";
   await appendEvent(workspaceDir, { type: "flow_retry_requested", keys: retried });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+/** Adopt an additive workflow definition without discarding completed work.
+ *
+ * This is intentionally conservative: existing unit records are immutable,
+ * removed stages are retained in history, and only new top-level stages gain
+ * pending state. Operators use it after a backward-compatible manifest update
+ * (for example, adding a final validation stage), never as a substitute for
+ * --reset after changing the meaning of completed stages. */
+export async function migrateFlow(workspaceDir: string, workflow: WorkflowDef): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  if (state.status === "running") {
+    throw new Error("Cannot migrate a running flow. Wait for it to pause or finish first.");
+  }
+  const nextHash = workflowHash(workflow);
+  if (state.workflowHash === nextHash) return state;
+
+  const added: string[] = [];
+  for (const stage of workflow.stages) {
+    if (state.units[stage.id]) continue;
+    state.units[stage.id] = UnitState.parse({});
+    added.push(stage.id);
+  }
+  const previousHash = state.workflowHash;
+  state.workflowHash = nextHash;
+  if (state.status === "completed" && added.length > 0) state.status = "idle";
+  await appendEvent(workspaceDir, {
+    type: "flow_migrated",
+    from_workflow_hash: previousHash,
+    to_workflow_hash: nextHash,
+    added_units: added,
+  });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+/** Re-run a top-level stage and everything after it while preserving earlier
+ * completed work. This is the deliberate repair path after an artifact or
+ * validator contract changes; it is narrower than --reset and explicit about
+ * which work may incur new runtime cost. */
+export async function reopenFlowFrom(workspaceDir: string, workflow: WorkflowDef, stageId: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  if (state.status === "running") throw new Error("Cannot reopen a running flow. Wait for it to pause or finish first.");
+  if (state.workflowHash !== workflowHash(workflow)) {
+    throw new Error("Workflow definition changed; run `malaclaw flow migrate` before reopening stages.");
+  }
+  const start = workflow.stages.findIndex((stage) => stage.id === stageId);
+  if (start === -1) throw new Error(`Unknown top-level stage "${stageId}".`);
+  const reopened = workflow.stages.slice(start).map((stage) => stage.id);
+  const belongsTo = (key: string, id: string) => key === id || key.startsWith(`${id}.`) || key.startsWith(`${id}-`);
+  for (const id of reopened) {
+    state.units[id] = UnitState.parse({});
+    for (const key of Object.keys(state.units)) {
+      if (key !== id && belongsTo(key, id)) delete state.units[key];
+    }
+    delete state.foreachItems[id];
+  }
+  const reopenedSet = new Set(reopened);
+  state.pendingApprovals = state.pendingApprovals.filter((approval) => !reopenedSet.has(approval.stageId));
+  state.status = "idle";
+  await appendEvent(workspaceDir, { type: "flow_reopened", from_stage: stageId, stages: reopened });
   await saveFlowState(workspaceDir, state);
   return state;
 }
