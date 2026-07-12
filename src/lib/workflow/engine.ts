@@ -77,6 +77,9 @@ export type WorkUnitSpec = {
   model?: string;
   model_tier?: string;
   command?: { cmd: string; args: string[] };
+  enabled: boolean;
+  skippable: boolean;
+  disabled_reason?: string;
   stageId: string;
   stepId?: string;
   itemId?: string;
@@ -254,12 +257,14 @@ function unitCapabilityFindings(
 export function findCapabilityMismatches(workflow: WorkflowDef, fallbackRuntimeId: string): string[] {
   const findings: string[] = [];
   const visit = (stage: WorkflowStage): void => {
+    if (!stage.enabled) return;
     if ("stages" in stage) {
       for (const child of stage.stages) visit(child);
       return;
     }
     if ("steps" in stage) {
       for (const step of stage.steps) {
+        if (!step.enabled) continue;
         findings.push(...unitCapabilityFindings(stepToSpec(stage, step, "item"), workflow, fallbackRuntimeId));
       }
       return;
@@ -273,6 +278,7 @@ export function findCapabilityMismatches(workflow: WorkflowDef, fallbackRuntimeI
 /** True when any unit of this stage resolves to a model tier marked
  *  requires_budget_approval — the stage must be pre-approved before spend. */
 function needsBudgetApproval(stage: WorkflowStage, workflow: WorkflowDef): boolean {
+  if (!stage.enabled) return false;
   const tiers = workflow.model_tiers ?? {};
   const gated = (tierId?: string) => tierId !== undefined && tiers[tierId]?.requires_budget_approval === true;
   if ("stages" in stage) return stage.stages.some((child) => needsBudgetApproval(child, workflow));
@@ -617,9 +623,9 @@ async function runUnit(
 
 /** Run a standard stage, honoring the bounded revision loop: `max_rounds`
  *  re-runs the stage (fresh retry budget per round) until `stop_when`
- *  evaluates true against reports/metrics.json or the cap is hit. Hitting
- *  the cap unmet is bounded improvement, not failure — the flow proceeds
- *  with a `revision_rounds_exhausted` event. */
+ *  evaluates true against reports/metrics.json or the cap is hit. The
+ *  manifest chooses whether an unmet cap is best-effort success or a release
+ *  failure through `on_exhaustion`. */
 async function runStandardStage(
   stage: StandardStage,
   opts: RunFlowOptions,
@@ -664,7 +670,14 @@ async function runStandardStage(
         await appendEvent(opts.workspaceDir, {
           type: "revision_rounds_exhausted", key: spec.key,
           rounds: unit.rounds, current: evaluation.current, condition: stage.stop_when,
+          on_exhaustion: stage.on_exhaustion,
         });
+        if (stage.on_exhaustion === "fail") {
+          unit.status = "failed";
+          unit.lastError = `Stop condition not met after ${unit.rounds} round(s): ${stage.stop_when} (current: ${evaluation.current ?? "missing"})`;
+          await appendEvent(opts.workspaceDir, { type: "unit_failed", key: spec.key, reason: "stop_condition_unmet" });
+          return "failed";
+        }
         return "succeeded";
       }
     }
@@ -693,6 +706,9 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     model: stage.model,
     model_tier: stage.model_tier,
     command: stage.command,
+    enabled: stage.enabled,
+    skippable: stage.skippable,
+    disabled_reason: stage.disabled_reason,
   };
 }
 
@@ -720,7 +736,24 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     model: step.model,
     model_tier: step.model_tier,
     command: step.command,
+    enabled: stage.enabled && step.enabled,
+    skippable: stage.skippable || step.skippable,
+    disabled_reason: !stage.enabled ? stage.disabled_reason : step.disabled_reason,
   };
+}
+
+async function markSkipped(
+  workspaceDir: string,
+  state: FlowState,
+  key: string,
+  reason: string | undefined,
+): Promise<void> {
+  state.units[key] ??= UnitState.parse({});
+  const unit = state.units[key];
+  if (unit.status === "skipped") return;
+  unit.status = "skipped";
+  unit.skipReason = reason ?? "disabled by workflow configuration";
+  await appendEvent(workspaceDir, { type: "unit_skipped", key, reason: unit.skipReason });
 }
 
 function approvalId(spec: WorkUnitSpec, pendingCount: number): string {
@@ -769,7 +802,11 @@ async function ensureForeachExpansion(
     for (const itemId of state.foreachItems[stage.id]) {
       for (const step of stage.steps) {
         const key = `${stage.id}.${step.id}[${itemId}]`;
-        state.units[key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
+        if (!step.enabled) {
+          await markSkipped(opts.workspaceDir, state, key, step.disabled_reason);
+        } else {
+          state.units[key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
+        }
       }
     }
     await appendEvent(opts.workspaceDir, {
@@ -790,13 +827,13 @@ function nextReadySpec(stage: ForeachStage, state: FlowState, running: Set<strin
       const step = stage.steps[i];
       const spec = stepToSpec(stage, step, itemId);
       const unit = state.units[spec.key];
-      if (unit?.status === "succeeded") continue;
+      if (unit?.status === "succeeded" || unit?.status === "skipped") continue;
       if (unit?.status === "failed") break;
       if (running.has(spec.key)) break;
       if (i > 0) {
         const previous = stepToSpec(stage, stage.steps[i - 1], itemId);
         const previousUnit = state.units[previous.key];
-        if (previousUnit?.status !== "succeeded") break;
+        if (previousUnit?.status !== "succeeded" && previousUnit?.status !== "skipped") break;
         if (previous.requires_human_approval && !previousUnit.approvalGranted) break;
       }
       return spec;
@@ -811,6 +848,10 @@ async function runForeachStage(
   state: FlowState,
   runtimeMaxConcurrent: number,
 ): Promise<StageOutcome> {
+  if (!stage.enabled) {
+    await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
+    return "succeeded";
+  }
   await ensureForeachExpansion(stage, opts, state);
   const stageUnit = state.units[stage.id];
   stageUnit.status = "running";
@@ -860,7 +901,10 @@ async function runForeachStage(
   }
 
   const allSucceeded = itemIds.every((itemId) =>
-    stage.steps.every((step) => state.units[`${stage.id}.${step.id}[${itemId}]`]?.status === "succeeded")
+    stage.steps.every((step) => {
+      const status = state.units[`${stage.id}.${step.id}[${itemId}]`]?.status;
+      return status === "succeeded" || status === "skipped";
+    })
   );
   if (!allSucceeded) {
     stageUnit.status = "pending";
@@ -904,7 +948,12 @@ async function runExecutableStage(
     budgetApproved: false,
   };
   const unit = state.units[stage.id];
-  if (unit.status === "succeeded") return "succeeded";
+  if (unit.status === "succeeded" || unit.status === "skipped") return "succeeded";
+
+  if (!stage.enabled) {
+    await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
+    return "succeeded";
+  }
 
   if (state.pendingApprovals.length > 0) return "awaiting_review";
 
@@ -942,10 +991,15 @@ async function runLoopStage(
     budgetApproved: false,
   };
   const unit = state.units[stage.id];
-  if (unit.status === "succeeded") return "succeeded";
+  if (unit.status === "succeeded" || unit.status === "skipped") return "succeeded";
+  if (!stage.enabled) {
+    await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
+    return "succeeded";
+  }
   unit.status = "running";
 
   let lastCurrent: number | undefined;
+  const scoreTrace: number[] = [];
   while (unit.rounds < stage.max_rounds) {
     const roundNumber = unit.rounds + 1;
     const roundPrefix = `${stage.id}-r${roundNumber}`;
@@ -1008,15 +1062,68 @@ async function runLoopStage(
         });
         return "succeeded";
       }
+
+      // Stagnation: N consecutive rounds each improving the watched metric by
+      // less than min_delta means further rewriting will not reach the target.
+      // Stop rather than burn the remaining rounds (AutoResearch's Δ rule).
+      if (stage.stop_on_stagnation && evaluation.current !== undefined) {
+        scoreTrace.push(evaluation.current);
+        const need = stage.stop_on_stagnation.consecutive_rounds;
+        const minDelta = stage.stop_on_stagnation.min_delta;
+        if (scoreTrace.length > need) {
+          const recent = scoreTrace.slice(-(need + 1));
+          const stagnant = recent.slice(1).every((score, i) => score - recent[i] < minDelta);
+          if (stagnant) {
+            const onStagnation = stage.stop_on_stagnation.on_stagnation ?? stage.on_exhaustion;
+            await appendEvent(opts.workspaceDir, {
+              type: "loop_stagnated",
+              key: stage.id,
+              rounds: unit.rounds,
+              current: evaluation.current,
+              trace: recent,
+              min_delta: minDelta,
+              consecutive_rounds: need,
+              on_stagnation: onStagnation,
+            });
+            const reportPath = resolveWithin(path.join(opts.workspaceDir, "reports"), `${stage.id}-stagnation.md`);
+            await fs.mkdir(path.dirname(reportPath), { recursive: true });
+            await fs.writeFile(reportPath,
+              `# Loop stagnation: ${stage.id}\n\nThe watched metric plateaued: ` +
+              `${recent.map((s) => s.toFixed(2)).join(" -> ")} ` +
+              `(< ${minDelta} gain for ${need} rounds), still below the target ` +
+              `"${stage.stop_when}". Rewriting stopped rather than spending the ` +
+              `remaining ${stage.max_rounds - unit.rounds} round(s). ` +
+              (onStagnation === "fail"
+                ? "Release fails: expand the corpus/evidence or lower the target, then re-run."
+                : "Proceeding with the best result so far.") + "\n",
+              "utf-8");
+            if (onStagnation === "fail") {
+              unit.status = "failed";
+              unit.lastError = `Loop "${stage.id}" stagnated below ${stage.stop_when} (${recent.map((s) => s.toFixed(2)).join(" -> ")})`;
+              return "failed";
+            }
+            unit.status = "succeeded";
+            return "succeeded";
+          }
+        }
+      }
+
       if (unit.rounds >= stage.max_rounds) {
-        unit.status = "succeeded";
         await appendEvent(opts.workspaceDir, {
           type: "revision_rounds_exhausted",
           key: stage.id,
           rounds: unit.rounds,
           current: lastCurrent,
           condition: stage.stop_when,
+          on_exhaustion: stage.on_exhaustion,
         });
+        if (stage.on_exhaustion === "fail") {
+          unit.status = "failed";
+          unit.lastError = `Stop condition not met after ${unit.rounds} round(s): ${stage.stop_when} (current: ${lastCurrent ?? "missing"})`;
+          await appendEvent(opts.workspaceDir, { type: "unit_failed", key: stage.id, reason: "stop_condition_unmet" });
+          return "failed";
+        }
+        unit.status = "succeeded";
         return "succeeded";
       }
     }
@@ -1078,7 +1185,7 @@ export async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> 
 
   for (const stage of workflow.stages) {
     const unit = state.units[stage.id];
-    if (unit.status === "succeeded") continue;
+    if (unit.status === "succeeded" || unit.status === "skipped") continue;
 
     if (state.pendingApprovals.length > 0) {
       state.status = "paused_for_approval";

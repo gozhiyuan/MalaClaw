@@ -1,4 +1,5 @@
 import { loadPack, loadTeam, loadAgent, loadSkill } from "./loader.js";
+import { Manifest as ManifestSchema } from "./schema.js";
 import {
   resolveAgentWorkspaceDir,
   resolveOpenClawAgentDir,
@@ -70,6 +71,10 @@ export async function resolveManifest(
   manifest: Manifest,
   opts: { projectDir?: string } = {},
 ): Promise<ResolveResult> {
+  // Callers include the CLI loader and programmatic consumers/tests. Normalize
+  // here so newly added schema defaults (such as stage.enabled) never change
+  // behavior based on which entry point invoked resolution.
+  manifest = ManifestSchema.parse(manifest);
   const project = resolveProjectMeta(manifest.project, opts.projectDir);
   const packs: ResolvedPack[] = [];
   const skills: ResolvedSkill[] = [];

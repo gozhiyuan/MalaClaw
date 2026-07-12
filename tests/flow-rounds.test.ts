@@ -82,6 +82,14 @@ describe("stop_when semantic validation", () => {
     expect(result.errors.join("\n")).toContain("stop_when");
   });
 
+  it("rejects a release-gated exhaustion policy without a stop condition", () => {
+    const result = validateWorkflowSemantics(
+      WorkflowDef.parse({ stages: [{ id: "revise", owner: "pm", on_exhaustion: "fail" }] }),
+      new Set(["pm"]),
+    );
+    expect(result.errors.join("\n")).toContain("on_exhaustion");
+  });
+
   it("accepts a valid loop config", () => {
     const wf = WorkflowDef.parse({
       stages: [{ id: "revise", owner: "pm", max_rounds: 3, stop_when: "review_score >= 8" }],
@@ -105,6 +113,52 @@ describe("stop_when semantic validation", () => {
     const result = validateWorkflowSemantics(wf, owners);
     expect(result.errors.join("\n")).toContain("quality.revise");
     expect(result.errors.join("\n")).toContain("missing-agent");
+  });
+
+  it("rejects disabled stages that are not explicitly skippable", () => {
+    const wf = WorkflowDef.parse({
+      stages: [{ id: "upgrade", owner: "pm", enabled: false, disabled_reason: "fast" }],
+    });
+    expect(validateWorkflowSemantics(wf, owners).errors.join("\n")).toContain("skippable");
+  });
+
+  it("rejects a required input whose earlier producer is disabled", () => {
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "upgrade", owner: "pm", outputs: ["sources/upgrades.json"], skippable: true, enabled: false, disabled_reason: "fast" },
+        { id: "write", owner: "pm", inputs: ["sources/upgrades.json"], outputs: ["paper.md"] },
+      ],
+    });
+    expect(validateWorkflowSemantics(wf, owners).errors.join("\n")).toContain("earlier disabled stage");
+  });
+
+  it("allows a disabled producer when its artifact is declared external", () => {
+    const wf = WorkflowDef.parse({
+      external_inputs: ["sources/upgrades.json"],
+      stages: [
+        { id: "upgrade", owner: "pm", outputs: ["sources/upgrades.json"], skippable: true, enabled: false, disabled_reason: "cached" },
+        { id: "write", owner: "pm", inputs: ["sources/upgrades.json"], outputs: ["paper.md"] },
+      ],
+    });
+    expect(validateWorkflowSemantics(wf, owners).errors).toEqual([]);
+  });
+});
+
+describe("engine skipped stages", () => {
+  it("records a disabled skippable stage and continues to enabled work", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [
+        { id: "optional", owner: "pm", outputs: ["optional.md"], skippable: true, enabled: false, disabled_reason: "fast profile" },
+        { id: "write", owner: "pm", outputs: ["paper.md"] },
+      ],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(state.status).toBe("completed");
+    expect(state.units.optional).toMatchObject({ status: "skipped", skipReason: "fast profile" });
+    await expect(fs.access(path.join(ws, "paper.md"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(ws, "optional.md"))).rejects.toThrow();
+    expect((await readEvents(ws)).some((event) => event.type === "unit_skipped" && event.key === "optional")).toBe(true);
   });
 });
 
@@ -173,6 +227,25 @@ describe("engine rounds loop", () => {
     expect(state.units.build.status).toBe("succeeded");
     const events = await readEvents(ws);
     expect(events.some((e) => e.type === "revision_rounds_exhausted" && e.key === "revise")).toBe(true);
+  });
+
+  it("fails a release-gated stage when its stop condition is unmet at the cap", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [
+        {
+          id: "revise", owner: "pm", outputs: ["draft.md"],
+          max_rounds: 2, stop_when: "review_score >= 9.5", on_exhaustion: "fail",
+        },
+        { id: "build", owner: "pm", outputs: ["final.md"] },
+      ],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(6, 0.5) });
+    expect(state.status).toBe("failed");
+    expect(state.units.revise.status).toBe("failed");
+    expect(state.units.build.status).toBe("pending");
+    const events = await readEvents(ws);
+    expect(events.some((e) => e.type === "revision_rounds_exhausted" && e.on_exhaustion === "fail")).toBe(true);
   });
 
   it("seeds round feedback into later-round prompts", async () => {
@@ -289,6 +362,20 @@ describe("engine loop groups", () => {
     expect(events.some((e) => e.type === "stop_condition_met" && e.key === "quality")).toBe(true);
   });
 
+  it("fails a release-gated loop group when its score target is unmet", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "quality", max_rounds: 1,
+        stop_when: "review_score >= 8.0", on_exhaustion: "fail",
+        stages: [{ id: "review", owner: "pm", outputs: ["reviews/scorecard.json"] }],
+      }],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: loopScoringRuntime({ 1: 6.5 }) });
+    expect(state.status).toBe("failed");
+    expect(state.units.quality.status).toBe("failed");
+  });
+
   it("resumes a loop group after a child approval gate", async () => {
     const ws = await makeWorkspace();
     const wf = WorkflowDef.parse({
@@ -336,5 +423,72 @@ describe("engine loop groups", () => {
       kind: "budget",
       stageId: "quality-r1-review",
     });
+  });
+});
+
+describe("stop_on_stagnation", () => {
+  it("halts a plateauing loop before exhausting rounds", async () => {
+    const ws = await makeWorkspace();
+    // Scores climb by 0.1/round from 6.0 — never reaches 8.0, always < 0.2 delta.
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "quality", max_rounds: 10,
+        stop_when: "review_score >= 8.0",
+        stop_on_stagnation: { min_delta: 0.2, consecutive_rounds: 2, on_stagnation: "succeed" },
+        stages: [{ id: "revise", owner: "pm", outputs: ["reviews/r.md"] }],
+      }],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(6.0, 0.1) });
+    expect(state.status).toBe("completed");
+    // Stops well before 10 rounds: rounds 1,2,3 = 6.0,6.1,6.2 -> two <0.2 deltas.
+    expect(state.units.quality.rounds).toBeLessThanOrEqual(4);
+    const events = await readEvents(ws);
+    expect(events.some((e) => e.type === "loop_stagnated")).toBe(true);
+    const report = await fs.readFile(path.join(ws, "reports", "quality-stagnation.md"), "utf-8");
+    expect(report).toContain("plateaued");
+  });
+
+  it("does not stagnate when the metric keeps improving past min_delta", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "quality", max_rounds: 5,
+        stop_when: "review_score >= 8.0",
+        stop_on_stagnation: { min_delta: 0.2, consecutive_rounds: 2 },
+        stages: [{ id: "revise", owner: "pm", outputs: ["reviews/r.md"] }],
+      }],
+    });
+    // +0.7/round from 6.0: 6.0,6.7,7.4,8.1 -> hits 8.0 at round 4, no stagnation.
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(6.0, 0.7) });
+    expect(state.status).toBe("completed");
+    const events = await readEvents(ws);
+    expect(events.some((e) => e.type === "loop_stagnated")).toBe(false);
+    expect(events.some((e) => e.type === "stop_condition_met")).toBe(true);
+  });
+
+  it("fails the release when stagnation policy is fail", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "quality", max_rounds: 10,
+        stop_when: "review_score >= 8.0",
+        stop_on_stagnation: { min_delta: 0.2, consecutive_rounds: 2, on_stagnation: "fail" },
+        stages: [{ id: "revise", owner: "pm", outputs: ["reviews/r.md"] }],
+      }],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: scoringRuntime(6.0, 0.05) });
+    expect(state.status).toBe("failed");
+  });
+
+  it("rejects stop_on_stagnation without stop_when in validation", () => {
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "q", max_rounds: 5,
+        stop_on_stagnation: { min_delta: 0.2, consecutive_rounds: 2 },
+        stages: [{ id: "revise", owner: "pm", outputs: ["r.md"] }],
+      }],
+    });
+    const result = validateWorkflowSemantics(wf, new Set(["pm"]));
+    expect(result.errors.join("\n")).toContain("stop_on_stagnation requires stop_when");
   });
 });

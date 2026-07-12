@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 // and watch stage progress, approvals, blockers, usage, logs, and prompts.
 
 type UnitState = {
-  status: "pending" | "running" | "succeeded" | "failed";
+  status: "pending" | "running" | "succeeded" | "skipped" | "failed";
   attempts: number;
   rounds?: number;
   lastOutcome?: string;
@@ -47,10 +47,10 @@ type FlowResponse = {
 };
 
 const colors: Record<string, string> = {
-  succeeded: "#3fb950", failed: "#f85149", running: "#d29922", pending: "#8b949e",
+  succeeded: "#3fb950", skipped: "#8b949e", failed: "#f85149", running: "#d29922", pending: "#8b949e",
   completed: "#3fb950", paused_for_approval: "#d29922", paused_blocker: "#f85149",
 };
-const marks: Record<string, string> = { succeeded: "✓", failed: "✗", running: "▸", pending: "·" };
+const marks: Record<string, string> = { succeeded: "✓", skipped: "⊘", failed: "✗", running: "▸", pending: "·" };
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);

@@ -420,10 +420,15 @@ Standard stages can run bounded improvement loops:
     - reports/metrics.json
   max_rounds: 5
   stop_when: review_score >= 8.0
+  # Optional. Default is succeed, which records exhaustion as best effort.
+  on_exhaustion: fail
 ```
 
 The condition is evaluated against `reports/metrics.json`. Hitting `max_rounds`
-without satisfying the condition is a bounded completion, not an infinite loop.
+without satisfying the condition is a bounded completion by default, not an
+infinite loop. Set `on_exhaustion: fail` for a release gate: the stage fails
+with `revision_rounds_exhausted` recorded in the event log, and downstream
+stages do not run. Earlier artifacts remain available for `flow reopen`.
 
 ## Loop Groups
 
@@ -436,6 +441,7 @@ routing, revision, and rebuild should repeat together:
   id: quality
   max_rounds: 5
   stop_when: review_score >= 8.0
+  on_exhaustion: fail
   stages:
     - id: review
       owner: reviewer
@@ -500,6 +506,32 @@ the rendered worker contract rather than a shared agent persona:
   instructions:
     - Cite only evidence packet chunks as [source:<id>:p<paragraph>].
 ```
+
+## Safe Stage Toggles
+
+Optional workflow breadth can be disabled explicitly without hiding it from
+state, events, or the dashboard:
+
+```yaml
+- id: venue_upgrade
+  owner: source-curator
+  skippable: true
+  enabled: false
+  disabled_reason: fast profile omits optional venue upgrades
+  outputs:
+    - sources/venue-upgrades.jsonl
+```
+
+`enabled: false` is valid only with `skippable: true` and a
+`disabled_reason`. The engine records the unit as `skipped` and never invokes a
+runtime for it. Semantic validation rejects a disabled producer when an enabled
+downstream stage has that artifact as a required input. Make the downstream
+input optional or declare a cached/user-provided replacement in
+`workflow.external_inputs` instead.
+
+Toggles apply to normal stages, foreach stages/steps, and loop groups/children.
+They are configuration-time decisions, not a worker instruction: a model cannot
+silently skip a declared quality gate.
 
 ## Smoke/Eval
 

@@ -20,6 +20,8 @@ describe("WorkflowStage schema", () => {
     expect(stage.validators).toEqual([]);
     expect(stage.validator_commands).toEqual([]);
     expect(stage.requires_human_approval).toBe(false);
+    expect(stage.enabled).toBe(true);
+    expect(stage.skippable).toBe(false);
     expect(stage.retry).toBeUndefined();
   });
 
@@ -38,9 +40,11 @@ describe("WorkflowStage schema", () => {
       retry: { max_attempts: 3 },
       max_rounds: 5,
       stop_when: "review_score >= 8.0",
+      on_exhaustion: "fail",
     });
     expect(stage.retry?.max_attempts).toBe(3);
     expect(stage.max_rounds).toBe(5);
+    expect(stage.on_exhaustion).toBe("fail");
     expect(stage.validator_commands[0].args).toContain("research");
     expect(stage.instructions).toEqual(["Cite only packet-backed evidence."]);
   });
@@ -74,6 +78,18 @@ describe("WorkflowStage schema", () => {
     expect(() =>
       WorkflowStage.parse({ id: "outline", owner: "a", requiresHumanApproval: true }),
     ).toThrow();
+  });
+});
+
+describe("stage enablement schema", () => {
+  it("accepts explicit skipped-stage metadata without loosening strict schemas", () => {
+    const stage = StandardStage.parse({
+      id: "venue_upgrade", owner: "curator", skippable: true, enabled: false,
+      disabled_reason: "fast profile omits venue upgrades",
+    });
+    expect(stage.enabled).toBe(false);
+    expect(stage.skippable).toBe(true);
+    expect(stage.disabled_reason).toContain("fast profile");
   });
 });
 

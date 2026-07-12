@@ -269,7 +269,7 @@ function printState(state: {
 }): void {
   console.log(`\nFlow status: ${state.status}`);
   for (const [key, unit] of Object.entries(state.units)) {
-    const mark = unit.status === "succeeded" ? "✓" : unit.status === "failed" ? "✗" : "·";
+    const mark = unit.status === "succeeded" ? "✓" : unit.status === "skipped" ? "⊘" : unit.status === "failed" ? "✗" : "·";
     console.log(`  ${mark} ${key} (${unit.status}, attempts: ${unit.attempts})`);
   }
   for (const approval of state.pendingApprovals) {

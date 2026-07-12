@@ -5,7 +5,7 @@ import { z } from "zod";
 import { StageRunOutcome, type WorkflowDef } from "../schema.js";
 
 export const UnitState = z.object({
-  status: z.enum(["pending", "running", "succeeded", "failed"]).default("pending"),
+  status: z.enum(["pending", "running", "succeeded", "skipped", "failed"]).default("pending"),
   attempts: z.number().int().default(0),
   /** Completed revision rounds (max_rounds/stop_when loops). */
   rounds: z.number().int().default(0),
@@ -18,6 +18,7 @@ export const UnitState = z.object({
   actualModel: z.string().optional(),
   approvalGranted: z.boolean().default(false),
   budgetApproved: z.boolean().default(false),
+  skipReason: z.string().optional(),
 });
 export type UnitState = z.infer<typeof UnitState>;
 

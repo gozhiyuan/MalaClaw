@@ -336,6 +336,11 @@ const workUnitFields = {
   validators: z.array(z.string()).default([]),
   validator_commands: z.array(WorkflowCommand).default([]),
   requires_human_approval: z.boolean().default(false),
+  /** Disabled units are retained in the graph/state as `skipped`; they never
+   * silently disappear. Only explicit opt-in units may be disabled. */
+  skippable: z.boolean().default(false),
+  enabled: z.boolean().default(true),
+  disabled_reason: z.string().min(1).optional(),
   retry: WorkflowRetry.optional(),
   // Runtime/model selection overrides. Resolution order:
   // unit override -> model_tier -> workflow runtime_policy.primary.
@@ -355,6 +360,10 @@ export const StandardStage = z
     type: z.literal("stage").optional(),
     max_rounds: z.number().int().min(1).optional(),
     stop_when: z.string().optional(),
+    /** What a bounded improvement loop means when its quality target is
+     * still unmet. "succeed" preserves the historical best-effort behavior;
+     * "fail" makes the unmet condition a release gate. */
+    on_exhaustion: z.enum(["succeed", "fail"]).default("succeed"),
   })
   .strict();
 
@@ -366,6 +375,9 @@ export const ForeachStage = z
     foreach: z.string().min(1), // path into an artifact, e.g. "outline.sections"
     item_name: z.string().default("item"),
     max_parallel: z.number().int().min(1).default(1),
+    skippable: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    disabled_reason: z.string().min(1).optional(),
     steps: z.array(WorkflowStep).min(1),
   })
   .strict()
@@ -383,6 +395,19 @@ export const ForeachStage = z
     });
   });
 
+/** Stop a bounded loop early when the stop_when metric plateaus. Rewriting an
+ *  artifact that has stopped improving just burns quota — AutoResearch V2 uses
+ *  the same "Δ small for N rounds" rule. Requires stop_when (the metric it
+ *  watches). on_stagnation controls whether a plateau is a soft stop or a
+ *  release failure, defaulting to the loop's on_exhaustion policy. */
+export const StopOnStagnation = z
+  .object({
+    min_delta: z.number().positive(),
+    consecutive_rounds: z.number().int().min(1).default(2),
+    on_stagnation: z.enum(["succeed", "fail"]).optional(),
+  })
+  .strict();
+
 export const LoopStage = z
   .object({
     type: z.literal("loop"),
@@ -390,6 +415,12 @@ export const LoopStage = z
     title: z.string().optional(),
     max_rounds: z.number().int().min(1),
     stop_when: z.string().optional(),
+    stop_on_stagnation: StopOnStagnation.optional(),
+    /** See StandardStage.on_exhaustion. */
+    on_exhaustion: z.enum(["succeed", "fail"]).default("succeed"),
+    skippable: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    disabled_reason: z.string().min(1).optional(),
     stages: z.array(z.union([ForeachStage, StandardStage])).min(1),
   })
   .strict()
@@ -471,6 +502,7 @@ export type WorkflowStep = z.infer<typeof WorkflowStep>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;
 export type LoopStage = z.infer<typeof LoopStage>;
+export type StopOnStagnation = z.infer<typeof StopOnStagnation>;
 export type RunLimits = z.infer<typeof RunLimits>;
 export type WorkflowStage = z.infer<typeof WorkflowStage>;
 export type WorkflowDef = z.infer<typeof WorkflowDef>;
