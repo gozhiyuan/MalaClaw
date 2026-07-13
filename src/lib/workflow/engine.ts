@@ -469,6 +469,9 @@ async function runUnit(
   while (unit.attempts < maxAttempts) {
     unit.attempts += 1;
     unit.status = "running";
+    // Persist before starting work so dashboards can distinguish an active
+    // unit from pending work even when the worker runs for minutes or hours.
+    await saveFlowState(workspaceDir, state);
     await appendEvent(workspaceDir, {
       type: "unit_started", key: unitKey, attempt: unit.attempts,
       requestedRuntime: requestedRuntimeId, actualRuntime: unitRuntime.id,
@@ -855,6 +858,7 @@ async function runForeachStage(
   await ensureForeachExpansion(stage, opts, state);
   const stageUnit = state.units[stage.id];
   stageUnit.status = "running";
+  await saveFlowState(opts.workspaceDir, state);
   const cap = Math.max(1, Math.min(stage.max_parallel, opts.workflow.max_parallel, runtimeMaxConcurrent));
   const running = new Map<string, Promise<{ spec: WorkUnitSpec; outcome: "succeeded" | "failed" | "paused" }>>();
   let pausing = false;
@@ -997,6 +1001,7 @@ async function runLoopStage(
     return "succeeded";
   }
   unit.status = "running";
+  await saveFlowState(opts.workspaceDir, state);
 
   let lastCurrent: number | undefined;
   const scoreTrace: number[] = [];

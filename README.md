@@ -207,6 +207,11 @@ MalaClaw deliberately does not own writing-specific concepts such as citation
 plans, novel bibles, or manuscript validation. It owns generic workflow
 execution.
 
+For LongWrite's full manual research flagship, including installation,
+dashboard setup, worker credentials, optional research/image API keys,
+approvals, quota supervision, and release artifacts, see the [Full
+AutoResearch V2 Flagship Guide](https://github.com/gozhiyuan/longwrite-agent/blob/main/docs/full-auto-research-v2-flagship.md).
+
 ## Useful Commands
 
 ```bash

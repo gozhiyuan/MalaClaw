@@ -242,6 +242,20 @@ malaclaw dashboard-extensions doctor
 malaclaw dashboard
 ```
 
+## Next: Run a LongWrite Flagship
+
+MalaClaw is the generic workflow/runtime layer. LongWrite is its long-form
+writing product layer: it compiles writing configuration into a MalaClaw flow,
+then uses the same worker runtime, state, approval, validation, and supervision
+mechanisms described above.
+
+After completing the runtime check in this guide, follow LongWrite's [Full
+AutoResearch V2 Flagship Guide](https://github.com/gozhiyuan/longwrite-agent/blob/main/docs/full-auto-research-v2-flagship.md)
+for source-checkout setup, a full research workspace, dashboard registration,
+optional API keys, manual outline approval, quota supervision, and acceptance
+artifacts. It is intentionally a product guide rather than a required MalaClaw
+dependency.
+
 ## 10. Contribute
 
 Read [`../CONTRIBUTING.md`](../CONTRIBUTING.md). Contribute generic workflow
