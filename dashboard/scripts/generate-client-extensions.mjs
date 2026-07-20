@@ -7,7 +7,7 @@ const dashboardRoot = path.resolve(__dirname, "..");
 const generatedPath = path.join(dashboardRoot, "src/extensions/generated.tsx");
 const longWriteClientEntry = path.resolve(
   dashboardRoot,
-  "../../longwrite-agent/dashboard-extension/client/index.tsx",
+  "../../MrMaLiang/packages/longwrite/dashboard-extension/client/index.tsx",
 );
 const includeLocalLongWrite = process.env.MALACLAW_DASHBOARD_SKIP_LOCAL_LONGWRITE !== "1";
 
@@ -15,7 +15,7 @@ const typeImport = 'import type { DashboardClientExtension } from "./types";\n';
 
 let source;
 if (includeLocalLongWrite && existsSync(longWriteClientEntry)) {
-  source = `${typeImport}import { longWriteDashboardClientExtension } from "../../../../longwrite-agent/dashboard-extension/client";\n\nexport const dashboardClientExtensions: DashboardClientExtension[] = [\n  longWriteDashboardClientExtension,\n];\n`;
+  source = `${typeImport}import { longWriteDashboardClientExtension } from "../../../../MrMaLiang/packages/longwrite/dashboard-extension/client";\n\nexport const dashboardClientExtensions: DashboardClientExtension[] = [\n  longWriteDashboardClientExtension,\n];\n`;
 } else {
   source = `${typeImport}\nexport const dashboardClientExtensions: DashboardClientExtension[] = [];\n`;
 }

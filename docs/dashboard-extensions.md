@@ -22,7 +22,7 @@ export MALACLAW_DASHBOARD_SERVER_EXTENSIONS=/path/to/ext/dist/server/index.js
 # 2. ~/.malaclaw/dashboard.yaml   (MALACLAW_DIR override respected)
 dashboard:
   server_extensions:
-    - /path/to/longwrite-agent/dashboard-extension/dist/server/index.js
+    - /path/to/MrMaLiang/packages/longwrite/dashboard-extension/dist/server/index.js
 ```
 
 Inspect and debug the configuration:
@@ -59,8 +59,8 @@ stays stable across MalaClaw versions.
 ## Client extensions
 
 The client side is bundled at dashboard build time. During source builds, the
-dashboard generator checks for known sibling product checkouts such as
-`../longwrite-agent`; if present, their client tabs are included. If not, the
+dashboard generator checks for the sibling MrMaLiang checkout at
+`../MrMaLiang`; if present, its LongWrite client tab is included. If not, the
 core MalaClaw dashboard still builds and ships without downstream tabs.
 
 Packaged MalaClaw releases serve the already-built client bundle under

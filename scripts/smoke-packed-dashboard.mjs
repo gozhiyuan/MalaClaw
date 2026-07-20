@@ -5,7 +5,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const siblingLongWrite = path.resolve(repoRoot, "..", "longwrite-agent");
+const siblingLongWrite = path.resolve(repoRoot, "..", "MrMaLiang", "packages", "longwrite");
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {

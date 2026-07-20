@@ -159,14 +159,14 @@ For the LongWrite alpha extension, the React page source is owned by the
 LongWrite repo at:
 
 ```text
-../longwrite-agent/dashboard-extension/client/
+../MrMaLiang/packages/longwrite/dashboard-extension/client/
 ```
 
 Server-side product routes are loaded from installed modules or filesystem
 paths:
 
 ```bash
-export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/longwrite-agent/dashboard-extension/dist/server/index.js"
+export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/MrMaLiang/packages/longwrite/dashboard-extension/dist/server/index.js"
 malaclaw dashboard
 ```
 

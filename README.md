@@ -209,8 +209,8 @@ execution.
 
 For LongWrite's full manual research flagship, including installation,
 dashboard setup, worker credentials, optional research/image API keys,
-approvals, quota supervision, and release artifacts, see the [Full
-AutoResearch V2 Flagship Guide](https://github.com/gozhiyuan/longwrite-agent/blob/main/docs/full-auto-research-v2-flagship.md).
+approvals, quota supervision, and release artifacts, see the Agentic Survey
+Flagship Guide in the sibling MrMaLiang checkout.
 
 ## Useful Commands
 
@@ -252,10 +252,10 @@ other machines can reach the port.
 The dashboard includes a Flow monitor for active workflow runs and supports
 product-specific extensions. LongWrite is the first alpha extension, but it is
 not a core dashboard dependency: LongWrite owns its routes and product tab under
-`longwrite-agent/dashboard-extension`.
+`MrMaLiang/packages/longwrite/dashboard-extension`.
 
 When the MalaClaw dashboard is built from a checkout that has
-`../longwrite-agent`, the LongWrite client tab is included in the built
+`../MrMaLiang`, the LongWrite client tab is included in the built
 dashboard. Standalone MalaClaw builds omit downstream client tabs and still
 serve the core Flow monitor. Server-side extension routes are loaded at runtime
 from installed modules or local files with `MALACLAW_DASHBOARD_SERVER_EXTENSIONS`
@@ -264,11 +264,11 @@ or `~/.malaclaw/dashboard.yaml`:
 ```yaml
 dashboard:
   server_extensions:
-    - /path/to/longwrite-agent/dashboard-extension/dist/server/index.js
+    - /path/to/MrMaLiang/packages/longwrite/dashboard-extension/dist/server/index.js
 ```
 
 ```bash
-export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/longwrite-agent/dashboard-extension/dist/server/index.js"
+export MALACLAW_DASHBOARD_SERVER_EXTENSIONS="/path/to/MrMaLiang/packages/longwrite/dashboard-extension/dist/server/index.js"
 malaclaw dashboard-extensions doctor
 malaclaw dashboard
 ```

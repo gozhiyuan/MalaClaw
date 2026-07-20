@@ -232,7 +232,7 @@ To load LongWrite routes, configure the built LongWrite extension:
 # ~/.malaclaw/dashboard.yaml
 dashboard:
   server_extensions:
-    - /path/to/longwrite-agent/dashboard-extension/dist/server/index.js
+    - /path/to/MrMaLiang/packages/longwrite/dashboard-extension/dist/server/index.js
 ```
 
 Then check it:
@@ -249,12 +249,11 @@ writing product layer: it compiles writing configuration into a MalaClaw flow,
 then uses the same worker runtime, state, approval, validation, and supervision
 mechanisms described above.
 
-After completing the runtime check in this guide, follow LongWrite's [Full
-AutoResearch V2 Flagship Guide](https://github.com/gozhiyuan/longwrite-agent/blob/main/docs/full-auto-research-v2-flagship.md)
-for source-checkout setup, a full research workspace, dashboard registration,
-optional API keys, manual outline approval, quota supervision, and acceptance
-artifacts. It is intentionally a product guide rather than a required MalaClaw
-dependency.
+After completing the runtime check in this guide, follow LongWrite's Agentic
+Survey Flagship Guide in the sibling MrMaLiang checkout for source-checkout
+setup, a full research workspace, dashboard registration, optional API keys,
+manual outline approval, quota supervision, and acceptance artifacts. It is
+intentionally a product guide rather than a required MalaClaw dependency.
 
 ## 10. Contribute
 
