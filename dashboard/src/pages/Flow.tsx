@@ -16,6 +16,8 @@ type UnitState = {
 
 type FlowResponse = {
   dir: string;
+  orphaned?: boolean;
+  orphanReason?: string;
   state: {
     status: string;
     units: Record<string, UnitState>;
@@ -140,6 +142,18 @@ function groupUnitRows(
   return rows;
 }
 
+/** Durable state retains removed stages for auditability after a workflow
+ * migration. The live monitor must show only the currently declared graph. */
+function currentWorkflowUnits(
+  units: Record<string, UnitState>,
+  stages: FlowResponse["stages"],
+): Record<string, UnitState> {
+  const currentIds = stages.map((stage) => stage.id);
+  return Object.fromEntries(Object.entries(units).filter(([key]) => currentIds.some((id) => (
+    key === id || key.startsWith(`${id}.`) || key.startsWith(`${id}-r`)
+  ))));
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ border: "1px solid #30363d", borderRadius: 6, padding: 12 }}>
@@ -184,6 +198,8 @@ export function Flow() {
   };
 
   const state = data?.state ?? null;
+  const visibleUnits = data && state ? currentWorkflowUnits(state.units, data.stages) : {};
+  const historicalUnitCount = state ? Object.keys(state.units).length - Object.keys(visibleUnits).length : 0;
   const statusColor = state ? colors[state.status] ?? "#c9d1d9" : "#8b949e";
   const adaptiveEvents = (data?.events ?? []).filter((event) => event.type.startsWith("action_"));
 
@@ -211,7 +227,13 @@ export function Flow() {
       {isLoading && dir && <div style={{ color: "#8b949e" }}>Loading flow state…</div>}
 
       {data && !state && dir && !isLoading && (
-        <div style={{ color: "#d29922" }}>No flow state at {dir}/.malaclaw/flow — run `malaclaw flow run` first.</div>
+        <div style={{ color: "#d29922" }}>No flow state at {data.dir}/.malaclaw/flow — run `malaclaw flow run` first.</div>
+      )}
+
+      {data?.orphaned && (
+        <div style={{ color: "#f85149", border: "1px solid #f85149", borderRadius: 6, padding: 10 }}>
+          <strong>Orphaned flow detected.</strong> {data.orphanReason} No worker is running; completed checkpoints are preserved. Use <code>malaclaw flow recover-orphan --yes</code> from the component workspace, then explicitly resume.
+        </div>
       )}
 
       {state && (
@@ -330,6 +352,11 @@ export function Flow() {
           )}
 
           <Section title="Units">
+            {historicalUnitCount > 0 && (
+              <div style={{ color: "#8b949e", fontSize: 12, marginBottom: 8 }}>
+                {historicalUnitCount} retired unit record{historicalUnitCount === 1 ? "" : "s"} hidden; workflow migrations retain them in the event and log audit trail.
+              </div>
+            )}
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ color: "#8b949e", textAlign: "left" }}>
@@ -344,7 +371,7 @@ export function Flow() {
                 </tr>
               </thead>
               <tbody>
-                {groupUnitRows(state.units, data!.loops, data!.usageByUnit).map((row) =>
+                {groupUnitRows(visibleUnits, data!.loops, data!.usageByUnit).map((row) =>
                   row.kind === "header" ? (
                     <tr key={row.id} style={{ borderTop: "1px solid #30363d", background: "#161b22" }}>
                       <td colSpan={8} style={{ padding: "4px 8px", color: "#58a6ff", fontSize: 12 }}>

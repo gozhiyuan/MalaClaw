@@ -6,6 +6,8 @@ import { approveFlow, approveAllFlow, cancelFlow, pauseFlow, resumeFlow } from "
 import { resolveWithin } from "../../../dist/lib/workflow/safe-paths.js";
 import { summarizeUsage } from "../../../dist/commands/flow.js";
 import { loadManifest } from "../../../dist/lib/loader.js";
+import { readFlowLock, isProcessAlive } from "../../../dist/lib/workflow/lock.js";
+import YAML from "yaml";
 
 const FILE_KINDS = { logs: logsDir, prompts: promptsDir } as const;
 const SAFE_FLOW_FILE = /^[A-Za-z0-9][A-Za-z0-9._\[\]-]*$/;
@@ -171,9 +173,40 @@ function requireDir(dir: unknown): string {
   return dir;
 }
 
+/**
+ * A MrMaLiang program workspace is a parent directory; its executable
+ * MalaClaw flow lives in the declared writing component.  The generic Flow
+ * page should therefore accept either the component itself or its program
+ * parent, just as the MrMaLiang dashboard tab does.  Other MalaClaw
+ * workspaces remain unchanged.
+ */
+async function resolveFlowWorkspace(requestedDir: string): Promise<string> {
+  try {
+    await fs.access(path.join(requestedDir, "malaclaw.yaml"));
+    return requestedDir;
+  } catch {
+    // Continue only when this is plausibly a MrMaLiang parent workspace.
+  }
+
+  try {
+    const raw = await fs.readFile(path.join(requestedDir, "maliang.yaml"), "utf-8");
+    const config = YAML.parse(raw) as { components?: { writing?: { workspace?: unknown } } };
+    const component = config.components?.writing?.workspace;
+    if (typeof component !== "string" || component.length === 0) return requestedDir;
+    const candidate = path.resolve(requestedDir, component);
+    const relative = path.relative(requestedDir, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return requestedDir;
+    await fs.access(path.join(candidate, "malaclaw.yaml"));
+    return candidate;
+  } catch {
+    return requestedDir;
+  }
+}
+
 const routes: FastifyPluginAsync = async (app) => {
   app.get("/api/flow", async (req) => {
-    const dir = requireDir((req.query as { dir?: string }).dir);
+    const requestedDir = requireDir((req.query as { dir?: string }).dir);
+    const dir = await resolveFlowWorkspace(requestedDir);
     const [state, events, usage, stages, logs, prompts] = await Promise.all([
       loadFlowState(dir),
       readEvents(dir),
@@ -183,9 +216,16 @@ const routes: FastifyPluginAsync = async (app) => {
       listDir(promptsDir(dir)),
     ]);
     const blockers = await blockerReports(dir, events as Array<{ type?: unknown; ts?: unknown }>);
+    const lock = await readFlowLock(dir);
+    const orphanReason = state?.status === "running" && (!lock || !isProcessAlive(lock.pid))
+      ? lock ? `Scheduler pid ${lock.pid} is not alive.` : "No scheduler lock exists."
+      : undefined;
     return {
       dir,
+      requestedDir,
       state,
+      orphaned: orphanReason !== undefined,
+      orphanReason,
       stages,
       loops: await loopViews(dir, state?.units ?? {}),
       usage,
@@ -198,7 +238,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/flow/file", async (req, reply) => {
     const { dir, kind, name } = req.query as { dir?: string; kind?: string; name?: string };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     const kindDir = FILE_KINDS[kind as keyof typeof FILE_KINDS];
     if (!kindDir || !name || !SAFE_FLOW_FILE.test(name)) {
       return reply.status(400).send({ error: "kind must be logs|prompts and name must be a flow file" });
@@ -214,7 +254,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/flow/approve", async (req, reply) => {
     const { dir, approvalId } = (req.body ?? {}) as { dir?: string; approvalId?: string };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     if (!approvalId) return reply.status(400).send({ error: "approvalId is required" });
     try {
       const state = await approveFlow(workspaceDir, approvalId);
@@ -226,7 +266,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/flow/approve-all", async (req, reply) => {
     const { dir } = (req.body ?? {}) as { dir?: string };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     try {
       const state = await approveAllFlow(workspaceDir);
       return { ok: true, state };
@@ -237,7 +277,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/flow/pause", async (req, reply) => {
     const { dir } = (req.body ?? {}) as { dir?: string };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     try {
       return { ok: true, state: await pauseFlow(workspaceDir) };
     } catch (err) {
@@ -247,7 +287,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/flow/cancel", async (req, reply) => {
     const { dir, confirmed } = (req.body ?? {}) as { dir?: string; confirmed?: boolean };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     if (confirmed !== true) return reply.status(400).send({ error: "confirmed: true is required for emergency cancellation" });
     try {
       return { ok: true, state: await cancelFlow(workspaceDir) };
@@ -258,7 +298,7 @@ const routes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/flow/resume", async (req, reply) => {
     const { dir } = (req.body ?? {}) as { dir?: string };
-    const workspaceDir = requireDir(dir);
+    const workspaceDir = await resolveFlowWorkspace(requireDir(dir));
     try {
       return { ok: true, state: await resumeFlow(workspaceDir) };
     } catch (err) {

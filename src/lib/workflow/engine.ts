@@ -87,6 +87,7 @@ export type WorkUnitSpec = {
   enabled: boolean;
   skippable: boolean;
   disabled_reason?: string;
+  when?: string;
   stageId: string;
   stepId?: string;
   itemId?: string;
@@ -1005,6 +1006,7 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     enabled: stage.enabled && step.enabled,
     skippable: stage.skippable || step.skippable,
     disabled_reason: !stage.enabled ? stage.disabled_reason : step.disabled_reason,
+    when: step.when,
   };
 }
 
@@ -1217,13 +1219,26 @@ async function runExecutableStage(
   const unit = state.units[stage.id];
   if (unit.status === "succeeded" || unit.status === "skipped") return "succeeded";
 
-  if (stage.type === "action_dispatch") {
-    return runActionDispatchStage(stage, opts, state);
-  }
-
   if (!stage.enabled) {
     await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
     return "succeeded";
+  }
+
+  if ("when" in stage && stage.when) {
+    const evaluation = await evaluateStopCondition(opts.workspaceDir, stage.when);
+    if (!evaluation.met) {
+      await markSkipped(
+        opts.workspaceDir,
+        state,
+        stage.id,
+        `condition not met: ${stage.when} (current: ${evaluation.current ?? "missing"})`,
+      );
+      return "succeeded";
+    }
+  }
+
+  if (stage.type === "action_dispatch") {
+    return runActionDispatchStage(stage, opts, state);
   }
 
   if (state.pendingApprovals.length > 0) return "awaiting_review";

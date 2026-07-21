@@ -5,6 +5,7 @@ import { readEvents } from "../lib/workflow/state.js";
 import { runFlow, approveFlow, approveAllFlow, cancelFlow, recoverOrphanedFlow, getFlowStatus, pauseFlow, resumeFlow, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../lib/workflow/engine.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
 import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
+import { isFlowLockAlive, readFlowLock } from "../lib/workflow/lock.js";
 
 export async function runFlowRun(opts: { runtime?: string; reset?: boolean }): Promise<void> {
   const workspaceDir = process.cwd();
@@ -36,6 +37,11 @@ export async function runFlowStatus(): Promise<void> {
     return;
   }
   printState(state);
+  if (state.status === "running" && !(await isFlowLockAlive(process.cwd()))) {
+    const lock = await readFlowLock(process.cwd());
+    console.log(`\n⚠ Flow appears orphaned: ${lock ? `scheduler pid ${lock.pid} is not alive` : "no scheduler lock exists"}.`);
+    console.log("  No new work is running. Inspect logs, then use `malaclaw flow recover-orphan --yes` to preserve completed checkpoints and make the interrupted unit pending.");
+  }
   await printUsageSummary(process.cwd());
 }
 

@@ -31,7 +31,7 @@ function lockPath(workspaceDir: string): string {
   return path.join(flowDir(workspaceDir), "lock.json");
 }
 
-function pidAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -74,7 +74,7 @@ export async function acquireFlowLock(workspaceDir: string, holder: string): Pro
     // Do not let the same process silently re-enter: it would overwrite the
     // ownership record and make the first caller capable of releasing a later
     // caller's lock.
-    if (existing && pidAlive(existing.pid)) throw new FlowLockHeldError(existing);
+    if (existing && isProcessAlive(existing.pid)) throw new FlowLockHeldError(existing);
 
     // Atomically move the stale entry out of the way. A competing reclaimer
     // may win the following O_EXCL create; loop and observe its live lock.
@@ -86,6 +86,12 @@ export async function acquireFlowLock(workspaceDir: string, holder: string): Pro
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
   }
+}
+
+/** A flow left running without a live lock owner cannot make progress. */
+export async function isFlowLockAlive(workspaceDir: string): Promise<boolean> {
+  const lock = await readFlowLock(workspaceDir);
+  return lock !== null && isProcessAlive(lock.pid);
 }
 
 /** Release only if we still hold it — a stolen lock is not ours to remove. */

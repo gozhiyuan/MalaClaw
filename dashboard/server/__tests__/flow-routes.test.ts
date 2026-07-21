@@ -7,6 +7,8 @@ import type { FastifyInstance } from "fastify";
 
 let app: FastifyInstance;
 let ws: string;
+let programWs: string;
+let writingWs: string;
 
 const state = {
   version: 1,
@@ -74,12 +76,29 @@ beforeAll(async () => {
     ].join("\n"),
     "utf-8",
   );
+  programWs = await fs.mkdtemp(path.join(os.tmpdir(), "maliang-program-route-"));
+  writingWs = path.join(programWs, "writing");
+  await fs.cp(ws, writingWs, { recursive: true });
+  await fs.writeFile(
+    path.join(programWs, "maliang.yaml"),
+    [
+      "version: 1",
+      "project:",
+      "  id: fixture-program",
+      "components:",
+      "  writing:",
+      "    workspace: writing",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
   app = await createServer({ port: 0 });
 });
 
 afterAll(async () => {
   await app.close();
   await fs.rm(ws, { recursive: true, force: true });
+  await fs.rm(programWs, { recursive: true, force: true });
 });
 
 describe("flow routes", () => {
@@ -95,6 +114,15 @@ describe("flow routes", () => {
     expect(body.files.prompts).toContain("outline-attempt1.md");
     expect(body.blockers[0].file).toBe("reports/outline-blocker.md");
     expect(body.events.at(-1).type).toBe("unit_succeeded");
+  });
+
+  it("GET /api/flow resolves a MrMaLiang program workspace to its writing component", async () => {
+    const res = await app.inject({ method: "GET", url: `/api/flow?dir=${encodeURIComponent(programWs)}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.requestedDir).toBe(programWs);
+    expect(body.dir).toBe(writingWs);
+    expect(body.state.status).toBe("paused_for_approval");
   });
 
   it("GET /api/flow reports loop views and per-unit usage", async () => {

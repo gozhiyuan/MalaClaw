@@ -65,6 +65,12 @@ function validateStopConfig(
   }
 }
 
+function validateWhenConfig(id: string, when: string | undefined, errors: string[]): void {
+  if (when && !parseStopCondition(when)) {
+    errors.push(`Stage "${id}": when "${when}" is not a valid condition (<metric> <op> <number>)`);
+  }
+}
+
 function toWorkUnits(stage: WorkflowStage, prefix?: string): WorkUnit[] {
   const labelPrefix = prefix ? `${prefix}.` : "";
   if ("stages" in stage) {
@@ -130,10 +136,12 @@ export function validateWorkflowSemantics(
   const disabledOutputs: string[] = [];
 
   for (const stage of workflow.stages) {
+    validateWhenConfig(stage.id, "when" in stage ? stage.when : undefined, errors);
     if (!("steps" in stage) && stage.type !== "action_dispatch") {
       validateStopConfig(stage.id, stage.max_rounds, stage.stop_when, stage.on_exhaustion, errors, "stop_on_stagnation" in stage && stage.stop_on_stagnation !== undefined);
       if ("stages" in stage) {
         for (const child of stage.stages) {
+          validateWhenConfig(`${stage.id}.${child.id}`, "when" in child ? child.when : undefined, errors);
           if (!("steps" in child) && child.type !== "action_dispatch") {
             validateStopConfig(`${stage.id}.${child.id}`, child.max_rounds, child.stop_when, child.on_exhaustion, errors);
           }

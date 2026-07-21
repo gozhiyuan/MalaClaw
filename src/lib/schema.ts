@@ -348,6 +348,10 @@ const workUnitFields = {
   skippable: z.boolean().default(false),
   enabled: z.boolean().default(true),
   disabled_reason: z.string().min(1).optional(),
+  /** Execute this unit only when the numeric workspace metric satisfies the
+   * expression.  This makes optional recovery work explicit and auditable
+   * without allowing an LLM to alter the workflow graph. */
+  when: z.string().optional(),
   retry: WorkflowRetry.optional(),
   // Runtime/model selection overrides. Resolution order:
   // unit override -> model_tier -> workflow runtime_policy.primary.
@@ -433,6 +437,7 @@ export const ActionDispatchStage = z
     skippable: z.boolean().default(false),
     enabled: z.boolean().default(true),
     disabled_reason: z.string().min(1).optional(),
+    when: z.string().optional(),
   })
   .strict();
 
