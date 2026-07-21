@@ -38,6 +38,10 @@ export async function renderOperatorBrief(workspaceDir: string): Promise<string>
     lines.push("Inspect the listed artifacts and ask the human to approve explicitly with `malaclaw flow approve <id>` or `malaclaw flow review --batch`.");
   } else if (state.status === "paused_blocker") {
     lines.push("Keep `malaclaw flow supervise` running for transient quota/runtime blockers; do not reset completed work.");
+  } else if (state.status === "paused_by_operator") {
+    lines.push("The operator requested a safe pause. Inspect current artifacts, then run `malaclaw flow resume` when ready.");
+  } else if (state.status === "cancelled") {
+    lines.push("The operator cancelled an in-flight unit. Inspect its log/checkpoint, then run `malaclaw flow resume` to retry that pending unit.");
   } else if (state.status === "failed") {
     lines.push("Inspect the stage logs and reports, then use `malaclaw flow retry` after fixing an external or deterministic failure.");
   } else if (state.status === "idle") {

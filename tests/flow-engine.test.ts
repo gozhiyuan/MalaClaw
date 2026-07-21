@@ -3,9 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { WorkflowDef } from "../src/lib/schema.js";
-import { runFlow, approveFlow, getFlowStatus, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../src/lib/workflow/engine.js";
+import { runFlow, approveFlow, cancelFlow, recoverOrphanedFlow, getFlowStatus, pauseFlow, resumeFlow, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../src/lib/workflow/engine.js";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
 import { readEvents } from "../src/lib/workflow/state.js";
+import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "../src/lib/workflow/runtimes/base.js";
+import { CLI_HARNESS_CAPABILITIES } from "../src/lib/workflow/runtimes/base.js";
 
 const tempDirs: string[] = [];
 async function makeWorkspace(): Promise<string> {
@@ -25,6 +27,81 @@ const simpleWf = WorkflowDef.parse({
 });
 
 describe("runFlow", () => {
+  it("honors a safe-point pause after the active unit and resumes without repeating it", async () => {
+    const ws = await makeWorkspace();
+    let release: (() => void) | undefined;
+    let started: (() => void) | undefined;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const runtime: WorkerRuntime = {
+      // The engine's capability preflight resolves declared runtime IDs from
+      // its registry; retain dry-run's ID while replacing execution behavior.
+      id: "dry-run",
+      capabilities: CLI_HARNESS_CAPABILITIES,
+      async checkAvailable(): Promise<RuntimeHealth> { return { available: true, supports_headless: true }; },
+      async runStage(req: StageRunRequest): Promise<StageRunResult> {
+        started?.();
+        await new Promise<void>((resolve) => { release = resolve; });
+        for (const output of req.outputs) await fs.writeFile(path.join(req.workspaceDir, output), "done", "utf-8");
+        return { outcome: "success", producedFiles: req.outputs };
+      },
+    };
+    const running = runFlow({ workflow: simpleWf, workspaceDir: ws, runtime });
+    await startedPromise;
+    await pauseFlow(ws);
+    release?.();
+    const paused = await running;
+    expect(paused.status).toBe("paused_by_operator");
+    expect(paused.units.plan.status).toBe("succeeded");
+    expect(paused.units.build.status).toBe("pending");
+
+    const resumed = await resumeFlow(ws);
+    expect(resumed.status).toBe("idle");
+    const completed = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(completed.status).toBe("completed");
+    const events = await readEvents(ws);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "plan")).toHaveLength(1);
+  });
+
+  it("cancels an in-flight abortable worker and leaves its unit pending", async () => {
+    const ws = await makeWorkspace();
+    let started: (() => void) | undefined;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const runtime: WorkerRuntime = {
+      id: "dry-run",
+      capabilities: CLI_HARNESS_CAPABILITIES,
+      async checkAvailable(): Promise<RuntimeHealth> { return { available: true, supports_headless: true }; },
+      async runStage(req: StageRunRequest): Promise<StageRunResult> {
+        started?.();
+        return new Promise((resolve) => req.abortSignal?.addEventListener("abort", () =>
+          resolve({ outcome: "cancelled", producedFiles: [], message: "cancelled by test" }), { once: true }));
+      },
+    };
+    const running = runFlow({ workflow: simpleWf, workspaceDir: ws, runtime });
+    await startedPromise;
+    await cancelFlow(ws);
+    const cancelled = await running;
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.units.plan.status).toBe("pending");
+    await expect(runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() })).rejects.toThrow(/flow resume/i);
+  });
+
+  it("recovers an orphaned running unit without resetting completed checkpoints", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, ".malaclaw", "flow"), { recursive: true });
+    const running = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(running.status).toBe("completed");
+    // Model the durable state left by a scheduler crash after the first stage.
+    const statePath = path.join(ws, ".malaclaw", "flow", "state.json");
+    const state = JSON.parse(await fs.readFile(statePath, "utf-8"));
+    state.status = "running";
+    state.units.build = { status: "running", attempts: 1, rounds: 0, approvalGranted: false, budgetApproved: false };
+    await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+    const recovered = await recoverOrphanedFlow(ws);
+    expect(recovered.status).toBe("cancelled");
+    expect(recovered.units.plan.status).toBe("succeeded");
+    expect(recovered.units.build.status).toBe("pending");
+  });
+
   it("runs sequential stages to completion and writes artifacts + events", async () => {
     const ws = await makeWorkspace();
     const state = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });

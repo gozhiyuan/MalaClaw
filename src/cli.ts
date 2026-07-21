@@ -397,6 +397,41 @@ flow
   });
 
 flow
+  .command("pause")
+  .description("Pause safely after the current unit checkpoints; no new work starts")
+  .action(async () => {
+    const { runFlowPause } = await import("./commands/flow.js");
+    await runFlowPause();
+  });
+
+flow
+  .command("cancel")
+  .description("Emergency-cancel an in-flight worker; the interrupted unit remains pending")
+  .requiredOption("--yes", "Confirm emergency cancellation")
+  .action(async () => {
+    const { runFlowCancel } = await import("./commands/flow.js");
+    await runFlowCancel();
+  });
+
+flow
+  .command("recover-orphan")
+  .description("Recover a crashed scheduler after confirming no worker process remains")
+  .requiredOption("--yes", "Confirm that the scheduler and its worker are no longer running")
+  .action(async () => {
+    const { runFlowRecoverOrphan } = await import("./commands/flow.js");
+    await runFlowRecoverOrphan();
+  });
+
+flow
+  .command("resume")
+  .description("Clear an operator pause/cancellation and continue from preserved checkpoints")
+  .option("--runtime <id>", "Worker runtime to use (default: workflow runtime_policy or dry-run)")
+  .action(async (opts) => {
+    const { runFlowResume } = await import("./commands/flow.js");
+    await runFlowResume({ runtime: opts.runtime });
+  });
+
+flow
   .command("retry")
   .description("Reset failed units to pending without resetting completed workflow work")
   .action(async () => {

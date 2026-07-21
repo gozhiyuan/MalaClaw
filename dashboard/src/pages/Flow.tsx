@@ -48,7 +48,7 @@ type FlowResponse = {
 
 const colors: Record<string, string> = {
   succeeded: "#3fb950", skipped: "#8b949e", failed: "#f85149", running: "#d29922", pending: "#8b949e",
-  completed: "#3fb950", paused_for_approval: "#d29922", paused_blocker: "#f85149",
+  completed: "#3fb950", paused_for_approval: "#d29922", paused_blocker: "#f85149", paused_by_operator: "#d29922", cancelled: "#f85149",
 };
 const marks: Record<string, string> = { succeeded: "✓", skipped: "⊘", failed: "✗", running: "▸", pending: "·" };
 
@@ -165,6 +165,17 @@ export function Flow() {
       }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error); }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["flow", dir] }),
   });
+  const operatorControl = useMutation({
+    mutationFn: async ({ action, confirmed = false }: { action: "pause" | "cancel" | "resume"; confirmed?: boolean }) => {
+      const response = await fetch(`/api/flow/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir, ...(action === "cancel" ? { confirmed } : {}) }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["flow", dir] }),
+  });
 
   const load = () => {
     localStorage.setItem("malaclaw-flow-dir", input);
@@ -174,6 +185,7 @@ export function Flow() {
 
   const state = data?.state ?? null;
   const statusColor = state ? colors[state.status] ?? "#c9d1d9" : "#8b949e";
+  const adaptiveEvents = (data?.events ?? []).filter((event) => event.type.startsWith("action_"));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 1100 }}>
@@ -216,6 +228,37 @@ export function Flow() {
                 {" "}across {data!.usage.unitsWithUsage} units
               </span>
             )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {state.status === "running" && (
+              <button
+                onClick={() => operatorControl.mutate({ action: "pause" })}
+                disabled={operatorControl.isPending}
+                style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #8b949e", background: "#21262d", color: "#f0f6fc", cursor: "pointer" }}
+              >Pause after current unit</button>
+            )}
+            {(state.status === "paused_by_operator" || state.status === "cancelled") && (
+              <button
+                onClick={() => operatorControl.mutate({ action: "resume" })}
+                disabled={operatorControl.isPending}
+                style={{ padding: "5px 10px", borderRadius: 6, border: "none", background: "#238636", color: "#fff", cursor: "pointer" }}
+              >Resume</button>
+            )}
+            {state.status === "running" && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Cancel the in-flight worker? Its unit will remain pending and must be resumed explicitly.")) {
+                    operatorControl.mutate({ action: "cancel", confirmed: true });
+                  }
+                }}
+                disabled={operatorControl.isPending}
+                style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #f85149", background: "#21262d", color: "#f85149", cursor: "pointer" }}
+              >Emergency cancel</button>
+            )}
+            {state.status === "paused_by_operator" && <span style={{ color: "#8b949e", fontSize: 13 }}>The current unit finished; no new unit will start until resumed.</span>}
+            {state.status === "cancelled" && <span style={{ color: "#8b949e", fontSize: 13 }}>Interrupted work is pending. Resume explicitly to retry it.</span>}
+            {operatorControl.error && <span style={{ color: "#f85149", fontSize: 13 }}>{String(operatorControl.error)}</span>}
           </div>
 
           {state.pendingApprovals.length > 0 && (
@@ -267,6 +310,22 @@ export function Flow() {
                   )}
                 </div>
               ))}
+            </Section>
+          )}
+
+          {adaptiveEvents.length > 0 && (
+            <Section title="Adaptive action timeline">
+              <div style={{ fontSize: 13, display: "flex", flexDirection: "column", gap: 5 }}>
+                {[...adaptiveEvents].reverse().map((event, index) => (
+                  <div key={`${event.ts ?? ""}-${index}`} style={{ color: "#c9d1d9" }}>
+                    <span style={{ color: "#484f58", fontFamily: "monospace", marginRight: 8 }}>{event.ts?.slice(11, 19)}</span>
+                    <span style={{ color: event.type.includes("invalid") || event.type.includes("rejected") ? "#f85149" : event.type.includes("completed") ? "#3fb950" : "#d29922", fontFamily: "monospace" }}>{event.type}</span>
+                    {event.key != null && <span style={{ fontFamily: "monospace" }}> {String(event.key)}</span>}
+                    {typeof event.action === "string" && <span style={{ color: "#8b949e" }}> — {event.action}</span>}
+                  </div>
+                ))}
+              </div>
+              <p style={{ color: "#8b949e", fontSize: 12, marginBottom: 0 }}>The planner may select only actions declared in the workflow catalog. Open the action-plan and dispatch report in the workspace for findings and rationale.</p>
             </Section>
           )}
 

@@ -19,6 +19,17 @@ export const UnitState = z.object({
   approvalGranted: z.boolean().default(false),
   budgetApproved: z.boolean().default(false),
   skipReason: z.string().optional(),
+  /** Opaque remote-job handle supplied by a declared adapter. It stays in
+   * flow state so a restart never resubmits an already accepted GPU job. */
+  remoteJob: z.object({
+    adapter: z.string().min(1),
+    jobId: z.string().min(1),
+    status: z.enum(["submitted", "queued", "running", "succeeded", "failed", "cancelled"]),
+    submittedAt: z.string().datetime(),
+    /** Persist the complete adapter invocation so `flow cancel` can cancel a
+     * paused remote job even when no scheduler process remains alive. */
+    command: z.object({ cmd: z.string().min(1), args: z.array(z.string()).default([]) }).strict().optional(),
+  }).optional(),
 });
 export type UnitState = z.infer<typeof UnitState>;
 
@@ -40,6 +51,12 @@ export const FlowState = z.object({
     "running",
     "paused_for_approval",
     "paused_blocker",
+    /** Operator-requested safe pause: the current unit finished and the
+     * scheduler checkpointed before starting another one. */
+    "paused_by_operator",
+    /** Operator-requested cancellation. The interrupted unit remains pending
+     * and can only resume after an explicit operator action. */
+    "cancelled",
     "completed",
     "failed",
   ]).default("idle"),
@@ -56,6 +73,14 @@ export const FlowState = z.object({
   updatedAt: z.string(),
 });
 export type FlowState = z.infer<typeof FlowState>;
+
+/** Kept in a separate file from state.json so a dashboard/CLI request cannot
+ * race an engine save while a worker is running. */
+export const FlowControl = z.object({
+  action: z.enum(["pause", "cancel"]),
+  requestedAt: z.string().datetime(),
+});
+export type FlowControl = z.infer<typeof FlowControl>;
 
 export function flowDir(workspaceDir: string): string {
   return path.join(workspaceDir, ".malaclaw", "flow");
@@ -74,6 +99,9 @@ function statePath(workspaceDir: string): string {
 }
 function eventsPath(workspaceDir: string): string {
   return path.join(flowDir(workspaceDir), "events.jsonl");
+}
+function controlPath(workspaceDir: string): string {
+  return path.join(flowDir(workspaceDir), "control.json");
 }
 
 /** Stable hash of the workflow definition so a changed manifest is detected.
@@ -149,4 +177,24 @@ export async function readEvents(workspaceDir: string): Promise<FlowEvent[]> {
   } catch {
     return [];
   }
+}
+
+export async function readFlowControl(workspaceDir: string): Promise<FlowControl | null> {
+  try {
+    return FlowControl.parse(JSON.parse(await fs.readFile(controlPath(workspaceDir), "utf-8")));
+  } catch {
+    return null;
+  }
+}
+
+export async function requestFlowControl(workspaceDir: string, action: FlowControl["action"]): Promise<FlowControl> {
+  const control = FlowControl.parse({ action, requestedAt: new Date().toISOString() });
+  await fs.mkdir(flowDir(workspaceDir), { recursive: true });
+  await fs.writeFile(controlPath(workspaceDir), JSON.stringify(control, null, 2), "utf-8");
+  await appendEvent(workspaceDir, { type: `operator_${action}_requested` });
+  return control;
+}
+
+export async function clearFlowControl(workspaceDir: string): Promise<void> {
+  await fs.rm(controlPath(workspaceDir), { force: true });
 }

@@ -26,6 +26,7 @@ export class ScriptRuntime implements WorkerRuntime {
       cwd: req.workspaceDir,
       timeoutMs: req.timeoutMs,
       logPath,
+      abortSignal: req.abortSignal,
       env: {
         MALACLAW_WORKSPACE: req.workspaceDir,
         MALACLAW_UNIT_KEY: req.unitKey,
@@ -38,6 +39,9 @@ export class ScriptRuntime implements WorkerRuntime {
 
     if (result.timedOut) {
       return { outcome: "timeout", producedFiles: [], message: "script timed out", logRef: logPath };
+    }
+    if (result.aborted) {
+      return { outcome: "cancelled", producedFiles: [], message: "operator cancelled script", logRef: logPath };
     }
     if (result.spawnError) {
       return { outcome: "worker_error", producedFiles: [], message: result.spawnError, logRef: logPath };

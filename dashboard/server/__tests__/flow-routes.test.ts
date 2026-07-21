@@ -152,4 +152,20 @@ describe("flow routes", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it("POST /api/flow/pause, resume, and confirmed cancel expose operator controls", async () => {
+    const paused = await app.inject({ method: "POST", url: "/api/flow/pause", payload: { dir: ws } });
+    expect(paused.statusCode).toBe(200);
+    expect(paused.json().state.status).toBe("paused_by_operator");
+
+    const resumed = await app.inject({ method: "POST", url: "/api/flow/resume", payload: { dir: ws } });
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.json().state.status).toBe("idle");
+
+    const unconfirmed = await app.inject({ method: "POST", url: "/api/flow/cancel", payload: { dir: ws } });
+    expect(unconfirmed.statusCode).toBe(400);
+    const cancelled = await app.inject({ method: "POST", url: "/api/flow/cancel", payload: { dir: ws, confirmed: true } });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json().state.status).toBe("cancelled");
+  });
 });

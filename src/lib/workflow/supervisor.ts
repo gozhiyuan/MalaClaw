@@ -37,7 +37,7 @@ export type SuperviseOptions = {
 };
 
 export type SupervisorEvent = {
-  type: "run_finished" | "waiting_approval" | "retry_scheduled" | "deadline_reached" | "stopped_run_limit";
+  type: "run_finished" | "waiting_approval" | "retry_scheduled" | "deadline_reached" | "stopped_run_limit" | "stopped_operator";
   status?: FlowState["status"];
   delayMs?: number;
   attempt?: number;
@@ -48,7 +48,7 @@ export type SupervisorRecord = {
   startedAt: string;
   lastStatus?: string;
   blockerReason?: string;
-  blockerKind?: "quota_or_runtime" | "run_limit" | "approval";
+  blockerKind?: "quota_or_runtime" | "run_limit" | "approval" | "operator";
   nextRetryAt?: string;
   retries: number;
   history: Array<{ at: string; status: string }>;
@@ -136,6 +136,20 @@ export async function superviseFlow(opts: SuperviseOptions): Promise<FlowState> 
         record.blockerReason = undefined;
         record.blockerKind = undefined;
         await writeRecord(opts.workspaceDir, record);
+        return state;
+      }
+
+      // An operator control is authoritative. A detached supervisor must
+      // never turn a deliberate pause/cancellation into an automatic retry.
+      if (state.status === "paused_by_operator" || state.status === "cancelled") {
+        record.blockerKind = "operator";
+        record.blockerReason = state.status === "cancelled"
+          ? "operator cancelled the flow; explicit resume required"
+          : "operator requested a safe pause; explicit resume required";
+        record.nextRetryAt = undefined;
+        await writeRecord(opts.workspaceDir, record);
+        await appendEvent(opts.workspaceDir, { type: "supervisor_stopped_operator", status: state.status });
+        opts.onEvent?.({ type: "stopped_operator", status: state.status });
         return state;
       }
 

@@ -38,9 +38,17 @@ export type StageRunRequest = {
    *  the runtime's safe defaults; ignored by non-harness runtimes. */
   allowedTools?: string[];
   timeoutMs: number;
+  /** Set by the engine for a confirmed operator cancellation. Runtimes must
+   * terminate their child process and return the `cancelled` outcome. */
+  abortSignal?: AbortSignal;
   model?: string;
   promptPath?: string;
   logPath?: string;
+  /** Persisted opaque handle from an earlier remote-job submit/poll call. */
+  remoteJob?: { adapter: string; jobId: string; status: "submitted" | "queued" | "running" | "succeeded" | "failed" | "cancelled"; submittedAt: string; command?: WorkflowCommand };
+  /** Explicit lifecycle operation used by the engine for durable remote-job
+   * cancellation and by the runtime for result collection. */
+  remoteOperation?: "submit" | "status" | "collect" | "cancel";
 };
 
 export type StageRunResult = {
@@ -52,6 +60,7 @@ export type StageRunResult = {
   /** Provider-reported wait before a quota retry, when a concrete reset time
    * can be parsed from the CLI failure output. */
   retryAfterMs?: number;
+  remoteJob?: { adapter: string; jobId: string; status: "submitted" | "queued" | "running" | "succeeded" | "failed" | "cancelled"; submittedAt: string; command?: WorkflowCommand };
   usage?: {
     input_tokens?: number;
     output_tokens?: number;

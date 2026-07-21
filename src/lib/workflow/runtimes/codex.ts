@@ -94,10 +94,14 @@ export class CodexRuntime implements WorkerRuntime {
       stdinText: req.instructions,
       timeoutMs: req.timeoutMs,
       logPath,
+      abortSignal: req.abortSignal,
     });
 
     if (result.timedOut) {
       return { outcome: "timeout", producedFiles: [], message: "codex timed out", logRef: logPath };
+    }
+    if (result.aborted) {
+      return { outcome: "cancelled", producedFiles: [], message: "operator cancelled Codex", logRef: logPath };
     }
     if (result.spawnError) {
       return { outcome: "worker_error", producedFiles: [], message: result.spawnError, logRef: logPath };

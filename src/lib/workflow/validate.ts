@@ -85,6 +85,17 @@ function toWorkUnits(stage: WorkflowStage, prefix?: string): WorkUnit[] {
       disabledReason: !stage.enabled ? stage.disabled_reason : step.disabled_reason,
     }));
   }
+  if (stage.type === "action_dispatch") {
+    return [{
+      label: `${labelPrefix}${stage.id}`,
+      owner: stage.owner,
+      inputs: [stage.plan_path],
+      outputs: stage.outputs,
+      enabled: stage.enabled,
+      skippable: stage.skippable,
+      disabledReason: stage.disabled_reason,
+    }];
+  }
   return [{
     label: `${labelPrefix}${stage.id}`,
     owner: stage.owner,
@@ -119,11 +130,11 @@ export function validateWorkflowSemantics(
   const disabledOutputs: string[] = [];
 
   for (const stage of workflow.stages) {
-    if (!("steps" in stage)) {
+    if (!("steps" in stage) && stage.type !== "action_dispatch") {
       validateStopConfig(stage.id, stage.max_rounds, stage.stop_when, stage.on_exhaustion, errors, "stop_on_stagnation" in stage && stage.stop_on_stagnation !== undefined);
       if ("stages" in stage) {
         for (const child of stage.stages) {
-          if (!("steps" in child)) {
+          if (!("steps" in child) && child.type !== "action_dispatch") {
             validateStopConfig(`${stage.id}.${child.id}`, child.max_rounds, child.stop_when, child.on_exhaustion, errors);
           }
         }

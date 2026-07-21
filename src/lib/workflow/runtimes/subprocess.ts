@@ -12,6 +12,8 @@ export type SubprocessOptions = {
   env?: Record<string, string | undefined>;
   /** Combined stdout+stderr is always written here. */
   logPath: string;
+  /** A confirmed operator cancellation. */
+  abortSignal?: AbortSignal;
 };
 
 export type SubprocessResult = {
@@ -19,6 +21,7 @@ export type SubprocessResult = {
   /** Combined stdout+stderr. */
   output: string;
   timedOut: boolean;
+  aborted: boolean;
   spawnError?: string;
 };
 
@@ -37,21 +40,38 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
 
     const chunks: Buffer[] = [];
     let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let abort: (() => void) | undefined;
     const finish = async (result: SubprocessResult) => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
+      if (abort) opts.abortSignal?.removeEventListener("abort", abort);
       await fs.writeFile(opts.logPath, result.output, "utf-8").catch(() => {});
       resolve(result);
     };
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill("SIGTERM");
       void finish({
         code: null,
         output: Buffer.concat(chunks).toString("utf-8"),
         timedOut: true,
+        aborted: false,
       });
     }, opts.timeoutMs);
+
+    abort = () => {
+      child.kill("SIGTERM");
+      void finish({
+        code: null,
+        output: Buffer.concat(chunks).toString("utf-8"),
+        timedOut: false,
+        aborted: true,
+      });
+    };
+    if (opts.abortSignal?.aborted) abort();
+    else opts.abortSignal?.addEventListener("abort", abort, { once: true });
 
     if (opts.stdinText !== undefined && child.stdin) {
       child.stdin.write(opts.stdinText);
@@ -60,15 +80,14 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.on("error", (err) => {
-      clearTimeout(timer);
-      void finish({ code: null, output: "", timedOut: false, spawnError: err.message });
+      void finish({ code: null, output: "", timedOut: false, aborted: false, spawnError: err.message });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
       void finish({
         code,
         output: Buffer.concat(chunks).toString("utf-8"),
         timedOut: false,
+        aborted: false,
       });
     });
   });

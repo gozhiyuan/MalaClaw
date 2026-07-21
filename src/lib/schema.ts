@@ -262,6 +262,13 @@ export const WorkflowRetry = z
 // instead of treating every failure as a generic error.
 export const StageRunOutcome = z.enum([
   "success",
+  /** A remote job has been submitted or is still running. The engine stores
+   * its opaque handle and the supervisor re-enters the same stage to poll it. */
+  "remote_pending",
+  /** The operator explicitly interrupted an in-flight worker. The engine
+   * preserves its checkpoint and leaves the unit pending for an explicit
+   * resume; it is never treated as a worker or provider failure. */
+  "cancelled",
   "validation_failed",
   "worker_error",
   "timeout",
@@ -354,6 +361,19 @@ const workUnitFields = {
 // templates — opaque strings here, resolved by the engine.
 export const WorkflowStep = z.object(workUnitFields).strict();
 
+/** A catalog entry is an executable capability, not an arbitrary command the
+ * model can invent. The dispatcher only materializes entries declared here. */
+export const WorkflowAction = z
+  .object({
+    ...workUnitFields,
+    /** Prevent one action-plan from repeatedly spending on the same tool. */
+    max_invocations: z.number().int().min(1).max(10).default(1),
+    /** Run the action to materialize an operator brief, then pause before any
+     * later action starts. The approval is attached to this action unit. */
+    requires_operator_response: z.boolean().default(false),
+  })
+  .strict();
+
 export const StandardStage = z
   .object({
     ...workUnitFields,
@@ -395,6 +415,27 @@ export const ForeachStage = z
     });
   });
 
+/** A declarative bridge from an LLM-produced action plan to allowlisted work
+ * units. The engine validates the plan, records why each tool was selected,
+ * and executes only `workflow.tool_catalog` entries. */
+export const ActionDispatchStage = z
+  .object({
+    type: z.literal("action_dispatch"),
+    id: workflowId,
+    title: z.string().optional(),
+    owner: z.string().min(1),
+    plan_path: workspacePath,
+    outputs: z.array(workspacePath).default(["reports/action-dispatch.json"]),
+    /** Hard upper bound across selected actions in one dispatch. */
+    max_actions: z.number().int().min(1).max(20).default(6),
+    /** Optional narrower allowlist than the workflow catalog. */
+    allowed_actions: z.array(workflowId).default([]),
+    skippable: z.boolean().default(false),
+    enabled: z.boolean().default(true),
+    disabled_reason: z.string().min(1).optional(),
+  })
+  .strict();
+
 /** Stop a bounded loop early when the stop_when metric plateaus. Rewriting an
  *  artifact that has stopped improving just burns quota — AutoResearch V2 uses
  *  the same "Δ small for N rounds" rule. Requires stop_when (the metric it
@@ -421,7 +462,7 @@ export const LoopStage = z
     skippable: z.boolean().default(false),
     enabled: z.boolean().default(true),
     disabled_reason: z.string().min(1).optional(),
-    stages: z.array(z.union([ForeachStage, StandardStage])).min(1),
+    stages: z.array(z.union([ForeachStage, ActionDispatchStage, StandardStage])).min(1),
   })
   .strict()
   .superRefine((stage, ctx) => {
@@ -442,7 +483,7 @@ export const LoopStage = z
 // discriminated unions require the discriminator on every member. ForeachStage
 // is listed first but order does not affect correctness — strictness makes the
 // two shapes mutually exclusive.
-export const WorkflowStage = z.union([LoopStage, ForeachStage, StandardStage]);
+export const WorkflowStage = z.union([LoopStage, ForeachStage, ActionDispatchStage, StandardStage]);
 
 /** Run guardrails: what THIS workflow may consume before pausing. These are
  *  not provider quotas (MalaClaw cannot observe subscription quota) and not
@@ -475,6 +516,8 @@ export const WorkflowDef = z
     // Soft budget for the whole flow; enforcement arrives with real runtimes.
     budget_usd: z.number().positive().optional(),
     run_limits: RunLimits.optional(),
+    /** The only actions an LLM planner may select through action_dispatch. */
+    tool_catalog: z.array(WorkflowAction).default([]),
     stages: z.array(WorkflowStage).min(1),
   })
   .strict()
@@ -490,6 +533,24 @@ export const WorkflowDef = z
       }
       seen.add(stage.id);
     });
+    const actionIds = new Set<string>();
+    wf.tool_catalog.forEach((action, i) => {
+      if (actionIds.has(action.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tool_catalog", i, "id"], message: `Duplicate action id "${action.id}"` });
+      }
+      actionIds.add(action.id);
+    });
+    const checkDispatch = (stage: WorkflowStage, path: Array<string | number>): void => {
+      if (stage.type === "action_dispatch") {
+        for (const id of stage.allowed_actions) {
+          if (!actionIds.has(id)) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, "allowed_actions"], message: `Unknown catalog action "${id}"` });
+          }
+        }
+      }
+      if ("stages" in stage) stage.stages.forEach((child, index) => checkDispatch(child, [...path, "stages", index]));
+    };
+    wf.stages.forEach((stage, index) => checkDispatch(stage, ["stages", index]));
   });
 
 export type WorkflowRetry = z.infer<typeof WorkflowRetry>;
@@ -499,8 +560,10 @@ export type RuntimeFallbackCandidate = z.infer<typeof RuntimeFallbackCandidate>;
 export type RuntimePolicy = z.infer<typeof RuntimePolicy>;
 export type WorkflowCommand = z.infer<typeof WorkflowCommand>;
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
+export type WorkflowAction = z.infer<typeof WorkflowAction>;
 export type StandardStage = z.infer<typeof StandardStage>;
 export type ForeachStage = z.infer<typeof ForeachStage>;
+export type ActionDispatchStage = z.infer<typeof ActionDispatchStage>;
 export type LoopStage = z.infer<typeof LoopStage>;
 export type StopOnStagnation = z.infer<typeof StopOnStagnation>;
 export type RunLimits = z.infer<typeof RunLimits>;

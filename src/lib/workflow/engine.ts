@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import type {
+  ActionDispatchStage,
   ForeachStage,
   LoopStage,
   StandardStage,
@@ -8,15 +10,19 @@ import type {
   WorkflowDef,
   WorkflowStage,
   WorkflowStep,
+  WorkflowAction,
   RuntimeFallbackCandidate,
 } from "../schema.js";
 import {
   appendEvent,
+  clearFlowControl,
   checkpointsDir,
   initFlowState,
   loadFlowState,
   promptsDir,
   logsDir,
+  readFlowControl,
+  requestFlowControl,
   saveFlowState,
   workflowHash,
   UnitState,
@@ -51,6 +57,7 @@ const MAX_BACKOFFS = 5;
 const MAX_SKILL_DOCUMENTS = 24;
 const MAX_SKILL_CHARS = 180_000;
 const PAUSE_OUTCOMES = new Set([
+  "remote_pending",
   "quota_exhausted",
   "permission_blocked",
   "tool_missing",
@@ -85,8 +92,8 @@ export type WorkUnitSpec = {
   itemId?: string;
 };
 
-type ExecutableStage = StandardStage | ForeachStage;
-type StageOutcome = "succeeded" | "failed" | "paused" | "awaiting_review";
+type ExecutableStage = StandardStage | ForeachStage | ActionDispatchStage;
+type StageOutcome = "succeeded" | "failed" | "paused" | "cancelled" | "awaiting_review";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -269,6 +276,14 @@ export function findCapabilityMismatches(workflow: WorkflowDef, fallbackRuntimeI
       }
       return;
     }
+    if (stage.type === "action_dispatch") {
+      const allowed = stage.allowed_actions.length > 0 ? new Set(stage.allowed_actions) : null;
+      for (const action of workflow.tool_catalog) {
+        if (allowed && !allowed.has(action.id)) continue;
+        findings.push(...unitCapabilityFindings(actionToSpec(stage, action, { id: `capability-${action.id}`, tool: action.id, finding_ids: [], rationale: "capability preflight", acceptance_criteria: [] }), workflow, fallbackRuntimeId));
+      }
+      return;
+    }
     findings.push(...unitCapabilityFindings(stageToSpec(stage), workflow, fallbackRuntimeId));
   };
   for (const stage of workflow.stages) visit(stage);
@@ -282,6 +297,10 @@ function needsBudgetApproval(stage: WorkflowStage, workflow: WorkflowDef): boole
   const tiers = workflow.model_tiers ?? {};
   const gated = (tierId?: string) => tierId !== undefined && tiers[tierId]?.requires_budget_approval === true;
   if ("stages" in stage) return stage.stages.some((child) => needsBudgetApproval(child, workflow));
+  if (stage.type === "action_dispatch") {
+    const allowed = stage.allowed_actions.length > 0 ? new Set(stage.allowed_actions) : null;
+    return workflow.tool_catalog.some((action) => (!allowed || allowed.has(action.id)) && gated(action.model_tier));
+  }
   if ("steps" in stage) return stage.steps.some((step) => gated(step.model_tier));
   return gated(stage.model_tier);
 }
@@ -438,11 +457,31 @@ async function runUnit(
   opts: RunFlowOptions,
   state: FlowState,
   initialFeedback?: string[],
-): Promise<"succeeded" | "failed" | "paused"> {
+): Promise<"succeeded" | "failed" | "paused" | "cancelled"> {
   const { workspaceDir, workflow, runtime } = opts;
   const unitKey = spec.key;
   state.units[unitKey] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
   const unit = state.units[unitKey];
+
+  // Controls deliberately live outside state.json: a dashboard can request a
+  // pause or cancellation while this engine is saving progress without either
+  // writer clobbering the other. Every new unit observes the request before
+  // any new provider spend starts.
+  const control = await readFlowControl(workspaceDir);
+  if (control?.action === "pause") {
+    unit.status = "pending";
+    state.status = "paused_by_operator";
+    await appendEvent(workspaceDir, { type: "flow_paused_operator", key: unitKey, requestedAt: control.requestedAt });
+    await saveFlowState(workspaceDir, state);
+    return "paused";
+  }
+  if (control?.action === "cancel") {
+    unit.status = "pending";
+    state.status = "cancelled";
+    await appendEvent(workspaceDir, { type: "flow_cancelled_operator", key: unitKey, requestedAt: control.requestedAt });
+    await saveFlowState(workspaceDir, state);
+    return "cancelled";
+  }
   const maxAttempts = spec.retry?.max_attempts ?? 2;
   const requestedRuntimeId = resolveRuntimeId(spec, workflow, runtime.id);
   const unitRuntime = requestedRuntimeId === runtime.id ? runtime : getWorkerRuntime(requestedRuntimeId);
@@ -504,16 +543,33 @@ async function runUnit(
     const logPath = resolveWithin(logsDir(workspaceDir), `${fileTag}.log`);
     await fs.writeFile(promptPath, prompt, "utf-8");
 
+    const abortController = new AbortController();
+    // Cancellation is the only control that interrupts a worker. Pause is
+    // intentionally safe-point only: finish the in-flight unit, checkpoint,
+    // then stop scheduling new units.
+    const cancellationPoll = setInterval(() => {
+      void readFlowControl(workspaceDir).then((next) => {
+        if (next?.action === "cancel") abortController.abort();
+      });
+    }, 250);
     let attemptStartedAt = Date.now();
-    let result = await unitRuntime.runStage({
+    let result: StageRunResult;
+    try {
+      result = await unitRuntime.runStage({
       owner: spec.owner, instructions: prompt,
       workspaceDir, unitKey,
       outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
       command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
       model: requestedModel, promptPath, logPath,
-    });
+      abortSignal: abortController.signal,
+      remoteJob: unit.remoteJob,
+      });
+    } finally {
+      clearInterval(cancellationPoll);
+    }
     await recordAttemptTelemetry(workspaceDir, state, unitKey, result, attemptStartedAt, unitRuntime.id, requestedModel);
+    if (result.remoteJob) unit.remoteJob = result.remoteJob;
 
     // Rate limits back off and re-run without consuming an attempt.
     while (result.outcome === "rate_limited") {
@@ -534,6 +590,7 @@ async function runUnit(
         command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
         model: requestedModel, promptPath, logPath,
+        abortSignal: abortController.signal,
       });
       await recordAttemptTelemetry(workspaceDir, state, unitKey, result, attemptStartedAt, unitRuntime.id, requestedModel);
     }
@@ -577,6 +634,7 @@ async function runUnit(
           command: spec.command,
           allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
           model: fallbackModel, promptPath, logPath,
+          abortSignal: abortController.signal,
         });
         await recordAttemptTelemetry(workspaceDir, state, unitKey, result, fallbackStartedAt, fallback.runtime, fallbackModel);
         unit.lastOutcome = result.outcome;
@@ -592,8 +650,20 @@ async function runUnit(
         delete unit.retryAt;
       }
       await writeBlocker(workspaceDir, unitKey, result);
-      await appendEvent(workspaceDir, { type: "flow_paused_blocker", key: unitKey, outcome: result.outcome });
+      await appendEvent(workspaceDir, { type: result.outcome === "remote_pending" ? "remote_job_pending" : "flow_paused_blocker", key: unitKey, outcome: result.outcome, remoteJob: result.remoteJob });
       return "paused";
+    }
+
+    if (result.outcome === "cancelled") {
+      // Preserve any partial declared artifacts as a diagnostic checkpoint,
+      // but do not mark this unit complete. An explicit resume will re-run it.
+      await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
+      unit.status = "pending";
+      unit.lastError = result.message ?? "operator cancelled in-flight unit";
+      state.status = "cancelled";
+      await appendEvent(workspaceDir, { type: "flow_cancelled_operator", key: unitKey, in_flight: true });
+      await saveFlowState(workspaceDir, state);
+      return "cancelled";
     }
 
     if (result.outcome === "success") {
@@ -633,7 +703,7 @@ async function runStandardStage(
   stage: StandardStage,
   opts: RunFlowOptions,
   state: FlowState,
-): Promise<"succeeded" | "failed" | "paused"> {
+): Promise<"succeeded" | "failed" | "paused" | "cancelled"> {
   const spec = stageToSpec(stage);
   state.units[spec.key] ??= { status: "pending", attempts: 0, rounds: 0, approvalGranted: false, budgetApproved: false };
   const unit = state.units[spec.key];
@@ -713,6 +783,199 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     skippable: stage.skippable,
     disabled_reason: stage.disabled_reason,
   };
+}
+
+const PlannedAction = z.object({
+  id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  tool: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  // Every spend must trace back to a recorded finding. This prevents a
+  // planner from using the dispatcher as a generic second tool channel.
+  finding_ids: z.array(z.string().min(1)).min(1).max(30),
+  rationale: z.string().min(1).max(8_000),
+  /** Optional, workspace-observable targets owned by an integrating workflow.
+   * They cannot authorize a tool, path, runtime, or command; the dispatcher
+   * simply preserves them for the selected action and downstream review. */
+  acceptance_criteria: z.array(z.object({
+    metric: z.string().min(1).max(120),
+    target: z.number().nonnegative(),
+    scope: z.string().min(1).max(160).optional(),
+  }).strict()).max(10).default([]),
+}).strict();
+type PlannedAction = z.infer<typeof PlannedAction>;
+
+const PlannedFinding = z.object({
+  id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  severity: z.enum(["minor", "major", "critical"]),
+  summary: z.string().min(1).max(8_000),
+}).strict();
+
+const ActionPlan = z.object({
+  version: z.literal(1),
+  findings: z.array(PlannedFinding).max(100).default([]),
+  actions: z.array(PlannedAction).max(20),
+}).strict();
+type ActionPlan = z.infer<typeof ActionPlan>;
+
+function actionToSpec(dispatch: ActionDispatchStage, action: WorkflowAction, planned: PlannedAction): WorkUnitSpec {
+  return {
+    key: `${dispatch.id}.${action.id}[${planned.id}]`,
+    stageId: dispatch.id,
+    stepId: action.id,
+    itemId: planned.id,
+    title: action.title,
+    owner: action.owner,
+    inputs: [...action.inputs, dispatch.plan_path],
+    optional_inputs: action.optional_inputs,
+    outputs: action.outputs,
+    tools: action.tools,
+    allowed_tools: action.allowed_tools,
+    instructions: [
+      ...action.instructions,
+      `Adaptive action ${planned.id} was selected from ${dispatch.plan_path}.`,
+      `Rationale: ${planned.rationale}`,
+      ...(planned.finding_ids.length > 0 ? [`Address finding ids: ${planned.finding_ids.join(", ")}.`] : []),
+      ...((planned.acceptance_criteria ?? []).length > 0
+        ? [`Acceptance criteria: ${(planned.acceptance_criteria ?? []).map((criterion) => `${criterion.metric}${criterion.scope ? `(${criterion.scope})` : ""} >= ${criterion.target}`).join("; ")}.`]
+        : []),
+      "Use only the declared outputs and the evidence available in this workspace. Do not alter the action plan or invoke undeclared actions.",
+    ],
+    skills: [...new Set([...action.skills, dispatch.plan_path])],
+    validators: action.validators,
+    validator_commands: action.validator_commands,
+    requires_human_approval: action.requires_human_approval,
+    retry: action.retry,
+    runtime: action.runtime,
+    model: action.model,
+    model_tier: action.model_tier,
+    command: action.command,
+    enabled: action.enabled,
+    skippable: action.skippable,
+    disabled_reason: action.disabled_reason,
+  };
+}
+
+async function writeActionDispatchReport(
+  workspaceDir: string,
+  dispatch: ActionDispatchStage,
+  report: Record<string, unknown>,
+): Promise<void> {
+  for (const output of concreteOutputs(dispatch.outputs)) {
+    await fs.mkdir(path.dirname(resolveWithin(workspaceDir, output)), { recursive: true });
+    await fs.writeFile(resolveWithin(workspaceDir, output), `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+  }
+}
+
+/** Validate and execute an LLM action plan against the declarative catalog.
+ * The model selects names and rationale only; runtimes, commands, paths,
+ * approval gates, budgets, and retries remain engine-owned. */
+async function runActionDispatchStage(
+  stage: ActionDispatchStage,
+  opts: RunFlowOptions,
+  state: FlowState,
+): Promise<StageOutcome> {
+  state.units[stage.id] ??= UnitState.parse({});
+  const dispatcher = state.units[stage.id];
+  if (!stage.enabled) {
+    await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
+    return "succeeded";
+  }
+  if (dispatcher.status === "succeeded" || dispatcher.status === "skipped") return "succeeded";
+
+  let plan: ActionPlan;
+  try {
+    plan = ActionPlan.parse(JSON.parse(await fs.readFile(resolveWithin(opts.workspaceDir, stage.plan_path), "utf-8")));
+  } catch (error) {
+    dispatcher.status = "failed";
+    dispatcher.lastError = `invalid action plan ${stage.plan_path}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`;
+    await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "invalid_plan", plan_path: stage.plan_path, error: dispatcher.lastError });
+    await appendEvent(opts.workspaceDir, { type: "action_plan_invalid", key: stage.id, error: dispatcher.lastError });
+    return "failed";
+  }
+
+  const findingIds = new Set(plan.findings.map((finding) => finding.id));
+  const catalog = new Map(opts.workflow.tool_catalog.map((action) => [action.id, action]));
+  const allowed = stage.allowed_actions.length > 0 ? new Set(stage.allowed_actions) : null;
+  const selected = new Map<string, number>();
+  const findings: string[] = [];
+  if (plan.actions.length > stage.max_actions) findings.push(`plan selects ${plan.actions.length} actions; dispatch max_actions is ${stage.max_actions}`);
+  for (const item of plan.actions) {
+    const action = catalog.get(item.tool);
+    if (!action) findings.push(`${item.id}: unknown action tool "${item.tool}"`);
+    else if (allowed && !allowed.has(item.tool)) findings.push(`${item.id}: action tool "${item.tool}" is not allowed by this dispatch stage`);
+    else if ((selected.get(item.tool) ?? 0) >= action.max_invocations) findings.push(`${item.id}: action tool "${item.tool}" exceeds max_invocations ${action.max_invocations}`);
+    for (const findingId of item.finding_ids) if (!findingIds.has(findingId)) findings.push(`${item.id}: unknown finding id "${findingId}"`);
+    selected.set(item.tool, (selected.get(item.tool) ?? 0) + 1);
+  }
+  const operatorActions = plan.actions.filter((item) => catalog.get(item.tool)?.requires_operator_response);
+  if (operatorActions.length > 0 && plan.actions.length !== 1) {
+    findings.push("an operator-response action must be the only selected action in its plan");
+  }
+  if (findings.length > 0) {
+    dispatcher.status = "failed";
+    dispatcher.lastError = findings.join("; ");
+    await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "rejected", plan_path: stage.plan_path, findings });
+    await appendEvent(opts.workspaceDir, { type: "action_plan_rejected", key: stage.id, findings });
+    return "failed";
+  }
+
+  dispatcher.status = "running";
+  await saveFlowState(opts.workspaceDir, state);
+  const executions: Array<Record<string, unknown>> = [];
+  for (const planned of plan.actions) {
+    const action = catalog.get(planned.tool)!;
+    const spec = actionToSpec(stage, action, planned);
+    state.units[spec.key] ??= UnitState.parse({});
+    const unit = state.units[spec.key];
+    if (unit.status === "succeeded" || unit.status === "skipped") {
+      if (action.requires_operator_response && !unit.approvalGranted) {
+        queueApproval(state, spec);
+        dispatcher.status = "pending";
+        await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "awaiting_operator_response", plan_path: stage.plan_path, executions });
+        await appendEvent(opts.workspaceDir, { type: "action_operator_response_queued", key: spec.key, action: planned.tool });
+        return "awaiting_review";
+      }
+      executions.push({ id: planned.id, tool: planned.tool, status: unit.status, reused: true });
+      continue;
+    }
+    const tier = spec.model_tier ? opts.workflow.model_tiers?.[spec.model_tier] : undefined;
+    if (tier?.requires_budget_approval === true && !unit.budgetApproved) {
+      // The selected action, rather than the dispatcher, owns approval so
+      // approving a cheap/reused action never authorizes unrelated future
+      // tools. queueBudgetApproval's stage id is deliberately the unit key:
+      // approvalUnitKey then resolves back to this materialized action.
+      queueBudgetApproval(state, spec.key);
+      dispatcher.status = "pending";
+      await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "awaiting_budget_approval", plan_path: stage.plan_path, executions });
+      await appendEvent(opts.workspaceDir, { type: "action_budget_approval_queued", key: spec.key, action: planned.tool });
+      return "awaiting_review";
+    }
+    if (spec.requires_human_approval && !unit.approvalGranted) {
+      queueApproval(state, spec);
+      dispatcher.status = "pending";
+      await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "awaiting_approval", plan_path: stage.plan_path, executions });
+      await appendEvent(opts.workspaceDir, { type: "action_approval_queued", key: spec.key, action: planned.tool });
+      return "awaiting_review";
+    }
+    const outcome = await runUnit(spec, opts, state);
+    executions.push({ id: planned.id, tool: planned.tool, status: outcome, rationale: planned.rationale, finding_ids: planned.finding_ids });
+    if (outcome !== "succeeded") {
+      dispatcher.status = outcome === "failed" ? "failed" : "pending";
+      if (outcome === "failed") dispatcher.lastError = `action ${planned.id} (${planned.tool}) failed`;
+      await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: outcome, plan_path: stage.plan_path, executions });
+      return outcome;
+    }
+    if (action.requires_operator_response && !unit.approvalGranted) {
+      queueApproval(state, spec);
+      dispatcher.status = "pending";
+      await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "awaiting_operator_response", plan_path: stage.plan_path, executions });
+      await appendEvent(opts.workspaceDir, { type: "action_operator_response_queued", key: spec.key, action: planned.tool });
+      return "awaiting_review";
+    }
+  }
+  dispatcher.status = "succeeded";
+  await writeActionDispatchReport(opts.workspaceDir, stage, { version: 1, status: "completed", plan_path: stage.plan_path, executions });
+  await appendEvent(opts.workspaceDir, { type: "action_dispatch_completed", key: stage.id, actions: executions.map((entry) => entry.tool) });
+  return "succeeded";
 }
 
 function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): WorkUnitSpec {
@@ -860,7 +1123,7 @@ async function runForeachStage(
   stageUnit.status = "running";
   await saveFlowState(opts.workspaceDir, state);
   const cap = Math.max(1, Math.min(stage.max_parallel, opts.workflow.max_parallel, runtimeMaxConcurrent));
-  const running = new Map<string, Promise<{ spec: WorkUnitSpec; outcome: "succeeded" | "failed" | "paused" }>>();
+  const running = new Map<string, Promise<{ spec: WorkUnitSpec; outcome: "succeeded" | "failed" | "paused" | "cancelled" }>>();
   let pausing = false;
 
   while (true) {
@@ -876,7 +1139,7 @@ async function runForeachStage(
     const settled = await Promise.race(running.values());
     running.delete(settled.spec.key);
 
-    if (settled.outcome === "paused") {
+    if (settled.outcome === "paused" || settled.outcome === "cancelled") {
       pausing = true;
     } else if (settled.outcome === "succeeded" && settled.spec.requires_human_approval) {
       queueApproval(state, settled.spec);
@@ -887,7 +1150,7 @@ async function runForeachStage(
 
   if (pausing) {
     stageUnit.status = "pending";
-    return "paused";
+    return state.status === "cancelled" ? "cancelled" : "paused";
   }
 
   const itemIds = state.foreachItems[stage.id] ?? [];
@@ -953,6 +1216,10 @@ async function runExecutableStage(
   };
   const unit = state.units[stage.id];
   if (unit.status === "succeeded" || unit.status === "skipped") return "succeeded";
+
+  if (stage.type === "action_dispatch") {
+    return runActionDispatchStage(stage, opts, state);
+  }
 
   if (!stage.enabled) {
     await markSkipped(opts.workspaceDir, state, stage.id, stage.disabled_reason);
@@ -1040,6 +1307,10 @@ async function runLoopStage(
       if (outcome === "paused") {
         unit.status = "pending";
         return "paused";
+      }
+      if (outcome === "cancelled") {
+        unit.status = "pending";
+        return "cancelled";
       }
       if (outcome === "awaiting_review") {
         unit.status = "pending";
@@ -1183,6 +1454,9 @@ export async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> 
     state = await initFlowState(workflow, workspaceDir);
     await appendEvent(workspaceDir, { type: "flow_initialized" });
   }
+  if (state.status === "paused_by_operator" || state.status === "cancelled") {
+    throw new Error(`Flow is ${state.status}; run \`malaclaw flow resume\` before starting new work.`);
+  }
   if (state.status === "completed") return state;
 
   state.status = "running";
@@ -1210,7 +1484,13 @@ export async function runFlowUnlocked(opts: RunFlowOptions): Promise<FlowState> 
       return state;
     }
     if (outcome === "paused") {
-      state.status = "paused_blocker";
+      const control = await readFlowControl(workspaceDir);
+      state.status = control?.action === "pause" ? "paused_by_operator" : "paused_blocker";
+      await saveFlowState(workspaceDir, state);
+      return state;
+    }
+    if (outcome === "cancelled") {
+      state.status = "cancelled";
       await saveFlowState(workspaceDir, state);
       return state;
     }
@@ -1271,6 +1551,90 @@ export async function approveAllFlow(workspaceDir: string): Promise<FlowState> {
     type: "approvals_granted_batch",
     approvals: approvals.map((a) => a.id),
   });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+/** Request a safe-point pause. An active worker finishes, then the scheduler
+ * checkpoints before it starts another unit. */
+export async function pauseFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  await requestFlowControl(workspaceDir, "pause");
+  if (state.status !== "running") {
+    state.status = "paused_by_operator";
+    await appendEvent(workspaceDir, { type: "flow_paused_operator", immediate: true });
+    await saveFlowState(workspaceDir, state);
+  }
+  return state;
+}
+
+/** Confirmed cancellation. In addition to interrupting an in-flight local
+ * process, cancel durable remote handles even when the scheduler is currently
+ * paused. This is best-effort only for legacy handles that predate persisted
+ * adapter commands; those are reported explicitly rather than silently lost. */
+export async function cancelFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  await requestFlowControl(workspaceDir, "cancel");
+  const remote = getWorkerRuntime("remote-job");
+  for (const [key, unit] of Object.entries(state.units)) {
+    const handle = unit.remoteJob;
+    if (!handle || !["submitted", "queued", "running"].includes(handle.status)) continue;
+    if (!handle.command) {
+      await appendEvent(workspaceDir, { type: "remote_job_cancel_unavailable", key, remoteJob: handle, reason: "legacy handle has no persisted adapter command" });
+      continue;
+    }
+    try {
+      const result = await remote.runStage({ workspaceDir, unitKey: key, owner: "remote-cancellation", instructions: "Operator requested cancellation.", outputs: [], timeoutMs: 30_000, command: handle.command, remoteJob: handle, remoteOperation: "cancel" });
+      if (result.remoteJob) unit.remoteJob = result.remoteJob;
+      await appendEvent(workspaceDir, { type: result.outcome === "cancelled" ? "remote_job_cancelled" : "remote_job_cancel_failed", key, outcome: result.outcome, remoteJob: result.remoteJob ?? handle, message: result.message });
+    } catch (error) {
+      await appendEvent(workspaceDir, { type: "remote_job_cancel_failed", key, remoteJob: handle, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (state.status !== "running") {
+    state.status = "cancelled";
+    await appendEvent(workspaceDir, { type: "flow_cancelled_operator", immediate: true });
+    await saveFlowState(workspaceDir, state);
+  }
+  return state;
+}
+
+/** Recover from a crashed scheduler after an operator has independently
+ * confirmed that no worker remains. This is intentionally separate from the
+ * normal cancel path: it never attempts to signal a process and it changes
+ * only units left in `running`, preserving all completed checkpoints. */
+export async function recoverOrphanedFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  const orphaned = Object.entries(state.units)
+    .filter(([, unit]) => unit.status === "running")
+    .map(([key]) => key);
+  if (orphaned.length === 0) {
+    throw new Error("Flow has no running unit to recover. Use the normal pause, resume, retry, or reopen command.");
+  }
+  for (const key of orphaned) {
+    const unit = state.units[key];
+    state.units[key] = UnitState.parse({ attempts: unit.attempts });
+  }
+  state.status = "cancelled";
+  await requestFlowControl(workspaceDir, "cancel");
+  await appendEvent(workspaceDir, { type: "flow_orphan_recovered", units: orphaned });
+  await saveFlowState(workspaceDir, state);
+  return state;
+}
+
+/** Clear the durable operator control record without running new work. */
+export async function resumeFlow(workspaceDir: string): Promise<FlowState> {
+  const state = await loadFlowState(workspaceDir);
+  if (!state) throw new Error("No flow state found. Run `malaclaw flow run` first.");
+  if (state.status !== "paused_by_operator" && state.status !== "cancelled") {
+    throw new Error(`Flow is ${state.status}; only an operator-paused or cancelled flow needs resume.`);
+  }
+  await clearFlowControl(workspaceDir);
+  state.status = "idle";
+  await appendEvent(workspaceDir, { type: "flow_resumed_operator" });
   await saveFlowState(workspaceDir, state);
   return state;
 }
@@ -1364,6 +1728,9 @@ export async function reopenFlowFrom(workspaceDir: string, workflow: WorkflowDef
   const reopenedSet = new Set(reopened);
   state.pendingApprovals = state.pendingApprovals.filter((approval) => !reopenedSet.has(approval.stageId));
   state.status = "idle";
+  // Reopening is an explicit operator decision to schedule work again. Clear
+  // a stale pause/cancel marker left by orphan recovery before continuing.
+  await clearFlowControl(workspaceDir);
   await appendEvent(workspaceDir, { type: "flow_reopened", from_stage: stageId, stages: reopened });
   await saveFlowState(workspaceDir, state);
   return state;

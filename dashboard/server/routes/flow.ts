@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadFlowState, readEvents, logsDir, promptsDir } from "../../../dist/lib/workflow/state.js";
-import { approveFlow, approveAllFlow } from "../../../dist/lib/workflow/engine.js";
+import { approveFlow, approveAllFlow, cancelFlow, pauseFlow, resumeFlow } from "../../../dist/lib/workflow/engine.js";
 import { resolveWithin } from "../../../dist/lib/workflow/safe-paths.js";
 import { summarizeUsage } from "../../../dist/commands/flow.js";
 import { loadManifest } from "../../../dist/lib/loader.js";
@@ -139,12 +139,22 @@ function usageByUnit(events: UsageEvent[]): Record<string, { totalTokens: number
   return byUnit;
 }
 
-async function blockerReports(workspaceDir: string): Promise<Array<{ file: string; excerpt: string }>> {
+async function blockerReports(
+  workspaceDir: string,
+  events: Array<{ type?: unknown; ts?: unknown }>,
+): Promise<Array<{ file: string; excerpt: string }>> {
   const reportsDir = path.join(workspaceDir, "reports");
   const blockers: Array<{ file: string; excerpt: string }> = [];
+  // `flow reopen` starts a new execution generation while intentionally
+  // preserving workspace artifacts. Old blocker reports are useful on disk,
+  // but must not be presented as active blockers for the new generation.
+  const lastReopen = [...events].reverse().find((event) => event.type === "flow_reopened");
+  const reopenedAt = typeof lastReopen?.ts === "string" ? Date.parse(lastReopen.ts) : Number.NaN;
   for (const name of await listDir(reportsDir)) {
     if (!name.endsWith("-blocker.md")) continue;
     try {
+      const stat = await fs.stat(path.join(reportsDir, name));
+      if (Number.isFinite(reopenedAt) && stat.mtimeMs < reopenedAt) continue;
       const content = await fs.readFile(path.join(reportsDir, name), "utf-8");
       blockers.push({ file: `reports/${name}`, excerpt: content.slice(0, 400) });
     } catch {
@@ -164,15 +174,15 @@ function requireDir(dir: unknown): string {
 const routes: FastifyPluginAsync = async (app) => {
   app.get("/api/flow", async (req) => {
     const dir = requireDir((req.query as { dir?: string }).dir);
-    const [state, events, usage, stages, blockers, logs, prompts] = await Promise.all([
+    const [state, events, usage, stages, logs, prompts] = await Promise.all([
       loadFlowState(dir),
       readEvents(dir),
       summarizeUsage(dir),
       stageViews(dir),
-      blockerReports(dir),
       listDir(logsDir(dir)),
       listDir(promptsDir(dir)),
     ]);
+    const blockers = await blockerReports(dir, events as Array<{ type?: unknown; ts?: unknown }>);
     return {
       dir,
       state,
@@ -220,6 +230,37 @@ const routes: FastifyPluginAsync = async (app) => {
     try {
       const state = await approveAllFlow(workspaceDir);
       return { ok: true, state };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/flow/pause", async (req, reply) => {
+    const { dir } = (req.body ?? {}) as { dir?: string };
+    const workspaceDir = requireDir(dir);
+    try {
+      return { ok: true, state: await pauseFlow(workspaceDir) };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/flow/cancel", async (req, reply) => {
+    const { dir, confirmed } = (req.body ?? {}) as { dir?: string; confirmed?: boolean };
+    const workspaceDir = requireDir(dir);
+    if (confirmed !== true) return reply.status(400).send({ error: "confirmed: true is required for emergency cancellation" });
+    try {
+      return { ok: true, state: await cancelFlow(workspaceDir) };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/api/flow/resume", async (req, reply) => {
+    const { dir } = (req.body ?? {}) as { dir?: string };
+    const workspaceDir = requireDir(dir);
+    try {
+      return { ok: true, state: await resumeFlow(workspaceDir) };
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

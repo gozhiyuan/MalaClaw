@@ -5,6 +5,7 @@ import { CodexRuntime } from "./codex.js";
 import { DryRunRuntime } from "./dry-run.js";
 import { OpenAICompatibleRuntime } from "./openai-compatible.js";
 import { ScriptRuntime } from "./script.js";
+import { RemoteJobRuntime } from "./remote-job.js";
 
 // Deliberately separate from src/lib/adapters/registry.ts: those are
 // install-time provisioners; these execute workflow units.
@@ -30,6 +31,7 @@ export function listWorkerRuntimes(): WorkerRuntime[] {
 
 registerWorkerRuntime(new DryRunRuntime());
 registerWorkerRuntime(new ScriptRuntime());
+registerWorkerRuntime(new RemoteJobRuntime());
 registerWorkerRuntime(new ClaudeCodeRuntime());
 registerWorkerRuntime(new CodexRuntime());
 registerWorkerRuntime(new OpenAICompatibleRuntime());

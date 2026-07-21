@@ -81,10 +81,14 @@ export class ClaudeCodeRuntime implements WorkerRuntime {
       stdinText: req.instructions,
       timeoutMs: req.timeoutMs,
       logPath,
+      abortSignal: req.abortSignal,
     });
 
     if (result.timedOut) {
       return { outcome: "timeout", producedFiles: [], message: "claude-code timed out", logRef: logPath };
+    }
+    if (result.aborted) {
+      return { outcome: "cancelled", producedFiles: [], message: "operator cancelled Claude Code", logRef: logPath };
     }
     if (result.spawnError) {
       return { outcome: "worker_error", producedFiles: [], message: result.spawnError, logRef: logPath };

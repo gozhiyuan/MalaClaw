@@ -2,7 +2,7 @@ import { loadManifest } from "../lib/loader.js";
 import { spawn } from "node:child_process";
 import { resolveManifest } from "../lib/resolver.js";
 import { readEvents } from "../lib/workflow/state.js";
-import { runFlow, approveFlow, approveAllFlow, getFlowStatus, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../lib/workflow/engine.js";
+import { runFlow, approveFlow, approveAllFlow, cancelFlow, recoverOrphanedFlow, getFlowStatus, pauseFlow, resumeFlow, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../lib/workflow/engine.js";
 import { getWorkerRuntime, listWorkerRuntimes } from "../lib/workflow/runtimes/registry.js";
 import { runRuntimeSmoke } from "../lib/workflow/runtime-smoke.js";
 
@@ -49,6 +49,31 @@ export async function runFlowReviewBatch(): Promise<void> {
   const state = await approveAllFlow(process.cwd());
   console.log("✓ Approved all pending review items");
   printState(state);
+}
+
+export async function runFlowPause(): Promise<void> {
+  const state = await pauseFlow(process.cwd());
+  console.log("✓ Pause requested. The in-flight unit may finish; no new unit will start.");
+  printState(state);
+}
+
+export async function runFlowCancel(): Promise<void> {
+  const state = await cancelFlow(process.cwd());
+  console.log("✓ Cancellation requested. In-flight CLI work is terminated; run `flow resume` to retry its pending unit.");
+  printState(state);
+}
+
+export async function runFlowRecoverOrphan(): Promise<void> {
+  const state = await recoverOrphanedFlow(process.cwd());
+  console.log("✓ Recovered orphaned running unit(s). Completed checkpoints are preserved.");
+  printState(state);
+}
+
+export async function runFlowResume(opts: { runtime?: string }): Promise<void> {
+  const state = await resumeFlow(process.cwd());
+  console.log("✓ Operator control cleared; resuming from preserved state.");
+  printState(state);
+  await runFlowRun({ runtime: opts.runtime });
 }
 
 export async function runFlowRetry(): Promise<void> {
