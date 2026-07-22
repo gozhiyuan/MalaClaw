@@ -3,6 +3,7 @@ export type PromptUnit = {
   owner: string;
   inputs: string[];
   optional_inputs: string[];
+  image_inputs?: string[];
   outputs: string[];
   tools: string[];
   allowed_tools?: string[];
@@ -43,6 +44,10 @@ export function renderUnitPrompt(ctx: PromptContext): string {
   }
   prompt += section("Inputs", stage.inputs);
   prompt += section("Optional inputs (use if present, never required)", stage.optional_inputs);
+  prompt += section(
+    "Visual inputs attached to this prompt (inspect rendered pixels before judging)",
+    stage.image_inputs ?? [],
+  );
   prompt += section("Required outputs", stage.outputs);
   prompt += section("Tools you may reference", stage.tools);
   prompt += section("Harness tools granted for this stage", stage.allowed_tools ?? []);

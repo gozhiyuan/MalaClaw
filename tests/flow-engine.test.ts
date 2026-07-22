@@ -6,6 +6,7 @@ import { WorkflowDef } from "../src/lib/schema.js";
 import { runFlow, approveFlow, cancelFlow, recoverOrphanedFlow, getFlowStatus, pauseFlow, resumeFlow, retryFailedFlow, migrateFlow, reopenFlowFrom } from "../src/lib/workflow/engine.js";
 import { DryRunRuntime } from "../src/lib/workflow/runtimes/dry-run.js";
 import { readEvents } from "../src/lib/workflow/state.js";
+import { readFlowFailures } from "../src/lib/workflow/failures.js";
 import type { RuntimeHealth, StageRunRequest, StageRunResult, WorkerRuntime } from "../src/lib/workflow/runtimes/base.js";
 import { CLI_HARNESS_CAPABILITIES } from "../src/lib/workflow/runtimes/base.js";
 
@@ -100,6 +101,12 @@ describe("runFlow", () => {
     expect(recovered.status).toBe("cancelled");
     expect(recovered.units.plan.status).toBe("succeeded");
     expect(recovered.units.build.status).toBe("pending");
+    await resumeFlow(ws);
+    const completed = await runFlow({ workflow: simpleWf, workspaceDir: ws, runtime: new DryRunRuntime() });
+    expect(completed.status).toBe("completed");
+    const events = await readEvents(ws);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "plan")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "unit_started" && event.key === "build")).toHaveLength(2);
   });
 
   it("runs sequential stages to completion and writes artifacts + events", async () => {
@@ -113,6 +120,11 @@ describe("runFlow", () => {
     const events = await readEvents(ws);
     expect(events.some((e) => e.type === "unit_succeeded" && e.key === "plan")).toBe(true);
     expect(events.some((e) => e.type === "flow_completed")).toBe(true);
+    const receipt = JSON.parse(await fs.readFile(
+      path.join(ws, ".malaclaw", "flow", "artifacts", "plan.json"), "utf-8",
+    ));
+    expect(receipt).toMatchObject({ version: 1, producer_stage: "plan", producer_attempt: 1 });
+    expect(receipt.outputs).toEqual([expect.objectContaining({ path: "plan.md" })]);
   });
 
   it("persists prompts per attempt", async () => {
@@ -143,6 +155,73 @@ describe("runFlow", () => {
       path.join(ws, ".malaclaw/flow/prompts/plan-attempt2.md"), "utf-8");
     expect(prompt2).toContain("Previous attempt failed");
     expect(prompt2).toContain("unknown_gate");
+  });
+
+  it("rejects an unchanged artifact left by an earlier attempt", async () => {
+    const ws = await makeWorkspace();
+    await fs.writeFile(path.join(ws, "plan.md"), "stale plan", "utf-8");
+    const wf = WorkflowDef.parse({
+      stages: [{
+        id: "plan", owner: "pm", outputs: ["plan.md"],
+        validators: ["required_output_exists"], retry: { max_attempts: 2 },
+      }],
+    });
+    const noOp: WorkerRuntime = {
+      id: "dry-run", capabilities: CLI_HARNESS_CAPABILITIES,
+      async checkAvailable() { return { available: true, supports_headless: true }; },
+      async runStage() { return { outcome: "success", producedFiles: ["plan.md"] }; },
+    };
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: noOp });
+    expect(state.status).toBe("failed");
+    expect(state.units.plan.lastError).toContain("stale_attempt_output");
+    const failures = await readFlowFailures(ws);
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toMatchObject({
+      stage: "plan", failure_class: "llm_contract", code: "stale_attempt_output", recoverable: true,
+    });
+    expect(failures[1].recoverable).toBe(false);
+  });
+
+  it("classifies an unexpected runtime throw and preserves an actionable record", async () => {
+    const ws = await makeWorkspace();
+    const wf = WorkflowDef.parse({
+      stages: [{ id: "plan", owner: "pm", outputs: ["plan.md"], retry: { max_attempts: 1 } }],
+    });
+    const throwing: WorkerRuntime = {
+      id: "dry-run", capabilities: CLI_HARNESS_CAPABILITIES,
+      async checkAvailable() { return { available: true, supports_headless: true }; },
+      async runStage() { throw new Error("simulated adapter crash"); },
+    };
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: throwing });
+    expect(state.status).toBe("failed");
+    const failures = await readFlowFailures(ws);
+    expect(failures).toEqual([
+      expect.objectContaining({
+        stage: "plan", failure_class: "unknown", code: "runtime_threw",
+        message: "simulated adapter crash", recoverable: true,
+      }),
+    ]);
+  });
+
+  it("fails before provider spend when a required upstream input is missing", async () => {
+    const ws = await makeWorkspace();
+    const workflow = WorkflowDef.parse({
+      stages: [{ id: "draft", owner: "writer", inputs: ["evidence/packet.json"], outputs: ["draft.md"] }],
+    });
+    let calls = 0;
+    const runtime: WorkerRuntime = {
+      id: "dry-run", capabilities: CLI_HARNESS_CAPABILITIES,
+      async checkAvailable() { return { available: true, supports_headless: true }; },
+      async runStage() { calls += 1; return { outcome: "success", producedFiles: ["draft.md"] }; },
+    };
+    const state = await runFlow({ workflow, workspaceDir: ws, runtime });
+    expect(state.status).toBe("failed");
+    expect(calls).toBe(0);
+    expect(await readFlowFailures(ws)).toEqual([
+      expect.objectContaining({
+        stage: "draft", failure_class: "deterministic_contract", code: "missing_required_input",
+      }),
+    ]);
   });
 
   it("explicitly retries failed units without resetting completed work", async () => {
@@ -283,6 +362,11 @@ describe("runFlow", () => {
     await expect(
       runFlow({ workflow: changed, workspaceDir: ws, runtime: new DryRunRuntime() }),
     ).rejects.toThrow(/changed|reset/i);
+    expect(await readFlowFailures(ws)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stage: "flow", failure_class: "operator_state", code: "flow_state_conflict",
+      }),
+    ]));
     const state = await runFlow({
       workflow: changed, workspaceDir: ws, runtime: new DryRunRuntime(), reset: true,
     });

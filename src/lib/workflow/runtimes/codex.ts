@@ -45,7 +45,9 @@ export function parseCodexTokensUsed(output: string): number | undefined {
  *  current as of 2026-07 — adjust via options if the CLI changes. */
 export class CodexRuntime implements WorkerRuntime {
   readonly id = "codex";
-  readonly capabilities = CLI_HARNESS_CAPABILITIES;
+  // `codex exec --image <file>` is a real multimodal prompt attachment, not
+  // a textual path hint. Visual review stages therefore get image evidence.
+  readonly capabilities = { ...CLI_HARNESS_CAPABILITIES, image_input: true };
   private readonly options: CodexOptions;
 
   constructor(options: CodexOptions = {}) {
@@ -84,6 +86,7 @@ export class CodexRuntime implements WorkerRuntime {
       "--ephemeral",
       ...(req.model ? ["-m", req.model] : []),
       ...(this.options.extraArgs ?? []),
+      ...(req.imagePaths ?? []).flatMap((image) => ["--image", image]),
       "-", // read the prompt from stdin
     ];
 

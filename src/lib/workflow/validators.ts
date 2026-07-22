@@ -137,6 +137,13 @@ export async function runValidators(
   commands: WorkflowCommand[] = [],
 ): Promise<ValidatorReport> {
   const findings: string[] = [];
+  // Some validator commands are normalizers: they validate an LLM-authored
+  // raw artifact and materialize its schema-checked derivative. Run those
+  // first so required-output checks verify the current derived artifact, not
+  // a stale file from an earlier attempt.
+  for (const command of commands) {
+    findings.push(...(await runValidatorCommand(command, outputs, workspaceDir)));
+  }
   for (const name of names) {
     const fn = builtins[name];
     if (!fn) {
@@ -144,9 +151,6 @@ export async function runValidators(
       continue;
     }
     findings.push(...(await fn(outputs, workspaceDir)));
-  }
-  for (const command of commands) {
-    findings.push(...(await runValidatorCommand(command, outputs, workspaceDir)));
   }
   return { pass: findings.length === 0, findings };
 }

@@ -336,6 +336,8 @@ function loopScoringRuntime(scores: Record<number, number>) {
 describe("engine loop groups", () => {
   it("runs a multi-stage loop until the group stop condition is met", async () => {
     const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "chapters"), { recursive: true });
+    await fs.writeFile(path.join(ws, "chapters", "seed.md"), "# Seed chapter\n", "utf-8");
     const wf = WorkflowDef.parse({
       stages: [{
         type: "loop",
@@ -374,6 +376,45 @@ describe("engine loop groups", () => {
     const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: loopScoringRuntime({ 1: 6.5 }) });
     expect(state.status).toBe("failed");
     expect(state.units.quality.status).toBe("failed");
+  });
+
+  it("never evaluates stale scorecard metrics after an incomplete loop round", async () => {
+    // A failed rebuild must not let a score from the prior successful build
+    // satisfy stop_when and silently skip recovery rounds.
+    const ws = await makeWorkspace({ "reports/metrics.json": '{"review_score":9.5}' });
+    const inner = new DryRunRuntime();
+    const runtime = {
+      id: "dry-run",
+      capabilities: inner.capabilities,
+      checkAvailable: () => inner.checkAvailable(),
+      async runStage(req: StageRunRequest) {
+        if (req.unitKey === "quality-r1-build") {
+          return { outcome: "worker_error" as const, producedFiles: [], message: "rebuild failed" };
+        }
+        const result = await inner.runStage(req);
+        if (/^quality-r[23]-build$/.test(req.unitKey)) {
+          await fs.writeFile(path.join(req.workspaceDir, "reports", "metrics.json"), '{"review_score":6.0}', "utf-8");
+        }
+        return result;
+      },
+    };
+    const wf = WorkflowDef.parse({
+      stages: [{
+        type: "loop", id: "quality", max_rounds: 3,
+        stop_when: "review_score >= 8.0", on_exhaustion: "succeed",
+        stages: [
+          { id: "review", owner: "pm", outputs: ["reviews/scorecard.json"] },
+          { id: "build", owner: "pm", retry: { max_attempts: 1 }, outputs: ["build/manuscript.pdf"] },
+        ],
+      }],
+    });
+
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime });
+    expect(state.status).toBe("completed");
+    expect(state.units.quality.rounds).toBe(3);
+    expect(state.units["quality-r2-build"].status).toBe("succeeded");
+    const events = await readEvents(ws);
+    expect(events.some((event) => event.type === "stop_condition_met" && event.key === "quality")).toBe(false);
   });
 
   it("resumes a loop group after a child approval gate", async () => {

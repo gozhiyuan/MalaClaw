@@ -43,6 +43,7 @@ A WorkerRuntime receives one unit of work:
 - declared outputs,
 - optional structured command,
 - optional model,
+- optional first-class image attachments,
 - timeout.
 
 It returns:
@@ -156,12 +157,17 @@ YAML fields a runtime may execute.
 | `declared_command_tool` | Can expose the stage's exact `command:` as a controlled tool during generation, or run it directly for deterministic workers. | A stage with `command: { cmd, args }`. | Retrieval helper, validator, small local analyzer, one approved tool call. |
 | `provider_tool_calling` | Can use provider-native tool/function-call protocol. | No direct YAML requirement today; used by runtime implementation and future tool routing. | API runtimes that can perform one controlled tool round. |
 | `cli_harness_tools` | Has a full CLI agent harness: file tools, shell/debug loops, skills/MCP, provider permissions. | Any non-empty `allowed_tools:` list. | Claude Code/Codex stages that need Bash, web/search tools, MCP, or broad project editing. |
+| `image_input` | Can attach workspace image files as actual multimodal prompt inputs. | Any non-empty `image_inputs:` list. | Codex visual QA of rendered PDFs, screenshots, plots, diagrams, or tables. |
 
 Alpha matrix: `claude-code`/`codex` are full harnesses; `openai-api`,
 `openai-compatible`, and `anthropic-api` are single-output with the
 declared-command tool; `gemini-api` and `ollama` are single-output only;
 `script` is deterministic; `dry-run` simulates every contract so any
 workflow stays CI-runnable. The runtimes are deliberately not equivalent.
+Currently `codex` is the runtime that declares `image_input`: it invokes
+`codex exec --image <absolute-workspace-file>` for every resolved attachment.
+MalaClaw never reads image bytes into the text `skills:` context, and it fails
+closed before execution if an `image_inputs:` stage targets another runtime.
 
 ### How MalaClaw Infers Stage Requirements
 
@@ -174,6 +180,7 @@ MalaClaw derives required capabilities from the stage declaration:
 | `outputs: [chapters/*.md]` | `multi_file_edit` | A glob means the unit may produce a file set. |
 | `command: { cmd: node, args: [tools/retrieve.js] }` | `declared_command_tool` | The runtime must be able to invoke or own that exact command. |
 | `allowed_tools: [Bash, WebSearch]` | `cli_harness_tools` | Only CLI harness runtimes can grant provider/harness tools. |
+| `image_inputs: [reports/review/page-*.png]` | `image_input` | The runtime must attach rendered image evidence, not merely receive file paths in text. |
 | `skills: [skills/style.md]` | none by itself | Skill files are injected into the prompt for any runtime; they do not grant tools. |
 | `tools: [web_search]` | none by itself | `tools` is advisory prompt text. Use `allowed_tools` for real harness grants or a `command` for a controlled local tool. |
 
@@ -551,3 +558,35 @@ reports/runtime-smoke-<runtime>-<timestamp>.md
 
 The report captures availability, flow status, artifact presence, events, and
 known failure modes.
+
+## Artifact freshness and failure records
+
+Every executable unit checks its required `inputs` before starting provider or
+script work. A missing upstream artifact fails before spend and tells the
+operator to retry or reopen from the producer stage. After a successful
+attempt, every concrete output must have been created or refreshed by that
+attempt; an unchanged file left by an earlier attempt cannot satisfy the next
+validator accidentally.
+
+An idempotent pass-through output is an explicit exception:
+
+```yaml
+- id: metadata_enrichment
+  owner: source-curator
+  inputs: [sources/corpus.jsonl]
+  outputs: [sources/corpus.jsonl, reports/enrichment.md]
+  allow_unchanged_outputs: [sources/corpus.jsonl]
+```
+
+MalaClaw writes an attempt receipt under
+`.malaclaw/flow/artifacts/<unit>.json` after validation succeeds. Flow-state
+saves use atomic replace, so a process or machine crash leaves either the old
+complete state or the new complete state rather than truncated JSON.
+
+Every failed boundary also appends a schema-validated record to
+`reports/failures.ndjson`. Its `failure_class` is one of
+`deterministic_contract`, `llm_contract`, `evidence_quality`,
+`external_environment`, `operator_state`, or `unknown`, with a stable code,
+stage, attempt, remediation, and recoverability flag. `unknown` is deliberate:
+an unanticipated runtime throw remains visible and actionable until it earns a
+more specific classification.

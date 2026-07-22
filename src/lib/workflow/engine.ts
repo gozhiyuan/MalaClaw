@@ -34,8 +34,13 @@ import { evaluateStopCondition } from "./stop-condition.js";
 import { renderUnitPrompt } from "./prompt.js";
 import { runValidators } from "./validators.js";
 import { getWorkerRuntime } from "./runtimes/registry.js";
-import { acquireFlowLock, releaseFlowLock } from "./lock.js";
+import { acquireFlowLock, releaseFlowLock, FlowLockHeldError } from "./lock.js";
 import type { StageRunResult, WorkerRuntime } from "./runtimes/base.js";
+import {
+  appendFlowFailure,
+  runtimeFailureClass,
+  validationFailureClass,
+} from "./failures.js";
 
 export type RunFlowOptions = {
   workflow: WorkflowDef;
@@ -71,7 +76,9 @@ export type WorkUnitSpec = {
   owner: string;
   inputs: string[];
   optional_inputs: string[];
+  image_inputs: string[];
   outputs: string[];
+  allow_unchanged_outputs: string[];
   tools: string[];
   allowed_tools: string[];
   instructions: string[];
@@ -179,6 +186,56 @@ async function loadSkillDocuments(
   return docs;
 }
 
+/** Resolve workspace-relative image paths/globs without ever treating binary
+ * bytes as text context. The absolute paths are handed to a multimodal worker
+ * (for example `codex exec --image`) as actual visual prompt attachments. */
+async function resolveImageInputs(workspaceDir: string, imageInputs: string[]): Promise<string[]> {
+  if (imageInputs.length === 0) return [];
+  const allFiles = imageInputs.some((value) => value.includes("*"))
+    ? await listWorkspaceFiles(workspaceDir)
+    : [];
+  const resolved = new Set<string>();
+  for (const value of imageInputs) {
+    if (value.includes("*")) {
+      const regex = artifactPatternToRegex(value);
+      for (const file of allFiles) if (regex.test(file)) resolved.add(file);
+    } else {
+      resolved.add(value);
+    }
+  }
+  const files: string[] = [];
+  for (const rel of [...resolved].sort()) {
+    try {
+      const absolute = resolveWithin(workspaceDir, rel);
+      if ((await fs.stat(absolute)).isFile()) files.push(absolute);
+    } catch {
+      // The unit's fail-closed precondition reports a missing visual input.
+    }
+  }
+  return files;
+}
+
+async function missingRequiredInputFindings(workspaceDir: string, inputs: string[]): Promise<string[]> {
+  if (inputs.length === 0) return [];
+  const allFiles = inputs.some((value) => value.includes("*"))
+    ? await listWorkspaceFiles(workspaceDir)
+    : [];
+  const findings: string[] = [];
+  for (const input of inputs) {
+    if (input.includes("*")) {
+      const regex = artifactPatternToRegex(input);
+      if (!allFiles.some((file) => regex.test(file))) findings.push(`required input pattern has no matches: ${input}`);
+      continue;
+    }
+    try {
+      await fs.access(resolveWithin(workspaceDir, input));
+    } catch {
+      findings.push(`required input is missing: ${input}`);
+    }
+  }
+  return findings;
+}
+
 function resolveRuntimeId(spec: WorkUnitSpec, workflow: WorkflowDef, fallback: string): string {
   if (spec.runtime) return spec.runtime;
   if (spec.model_tier && workflow.model_tiers?.[spec.model_tier]) {
@@ -250,6 +307,11 @@ function unitCapabilityFindings(
   if (spec.allowed_tools.length > 0 && !capabilities.cli_harness_tools) {
     findings.push(
       `${spec.key}: allowed_tools requires a CLI harness runtime (claude-code, codex); "${runtimeId}" has no harness tools`,
+    );
+  }
+  if (spec.image_inputs.length > 0 && !capabilities.image_input) {
+    findings.push(
+      `${spec.key}: image_inputs requires a runtime with image-input support; "${runtimeId}" cannot attach visual evidence`,
     );
   }
   if (spec.command && !capabilities.declared_command_tool) {
@@ -341,6 +403,65 @@ async function checkpointOutputs(workspaceDir: string, unitKey: string, outputs:
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(resolveWithin(workspaceDir, output), dest);
   }
+}
+
+type OutputSnapshot = { size: number; mtimeMs: number; ctimeMs: number };
+
+async function outputSnapshots(workspaceDir: string, outputs: string[]): Promise<Map<string, OutputSnapshot | null>> {
+  const snapshots = new Map<string, OutputSnapshot | null>();
+  for (const output of concreteOutputs(outputs)) {
+    try {
+      const stat = await fs.stat(resolveWithin(workspaceDir, output));
+      snapshots.set(output, { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs });
+    } catch {
+      snapshots.set(output, null);
+    }
+  }
+  return snapshots;
+}
+
+async function staleAttemptFindings(
+  workspaceDir: string,
+  outputs: string[],
+  allowUnchangedOutputs: string[],
+  before: Map<string, OutputSnapshot | null>,
+): Promise<string[]> {
+  const findings: string[] = [];
+  const after = await outputSnapshots(workspaceDir, outputs);
+  const allowed = new Set(allowUnchangedOutputs);
+  for (const output of concreteOutputs(outputs)) {
+    if (allowed.has(output)) continue;
+    const previous = before.get(output) ?? null;
+    const current = after.get(output) ?? null;
+    if (!current) continue; // required_output_exists reports the clearer finding.
+    if (previous && previous.size === current.size && previous.mtimeMs === current.mtimeMs && previous.ctimeMs === current.ctimeMs) {
+      findings.push(`stale_attempt_output: "${output}" was not updated by the current attempt`);
+    }
+  }
+  return findings;
+}
+
+async function writeAttemptReceipt(
+  workspaceDir: string,
+  state: FlowState,
+  unitKey: string,
+  runtime: string,
+  outputs: string[],
+): Promise<void> {
+  const snapshots = await outputSnapshots(workspaceDir, outputs);
+  const safeName = unitKey.replace(/[^A-Za-z0-9._-]/g, "_");
+  const target = resolveWithin(path.join(workspaceDir, ".malaclaw", "flow", "artifacts"), `${safeName}.json`);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify({
+    version: 1,
+    workflow_hash: state.workflowHash,
+    producer_stage: unitKey,
+    producer_attempt: state.units[unitKey]?.attempts ?? 0,
+    producer_round: state.units[unitKey]?.rounds ?? 0,
+    runtime,
+    created_at: new Date().toISOString(),
+    outputs: [...snapshots.entries()].flatMap(([output, snapshot]) => snapshot ? [{ path: output, ...snapshot }] : []),
+  }, null, 2)}\n`, "utf-8");
 }
 
 async function writeBlocker(
@@ -492,6 +613,24 @@ async function runUnit(
   unit.requestedModel = requestedModel;
   unit.actualModel = requestedModel;
 
+  // Required inputs are a stage precondition, not something a worker should
+  // discover after spending model/runtime budget. Optional inputs remain
+  // explicitly exempt and image inputs have their own multimodal check.
+  const missingInputs = await missingRequiredInputFindings(workspaceDir, spec.inputs);
+  if (missingInputs.length > 0) {
+    unit.status = "failed";
+    unit.lastError = missingInputs.join("; ");
+    await appendFlowFailure(workspaceDir, {
+      stage: unitKey,
+      failure_class: "deterministic_contract", code: "missing_required_input",
+      message: unit.lastError,
+      remediation: "Restore or regenerate the upstream artifact, then retry or reopen from its producer stage.",
+      recoverable: true,
+    });
+    await appendEvent(workspaceDir, { type: "unit_failed", key: unitKey, reason: "missing_required_input", findings: missingInputs });
+    return "failed";
+  }
+
   // Run-limit guardrail, checked before EVERY unit (standard, foreach item,
   // loop child): pause with preserved state instead of starting new spend.
   const limitCheck = checkRunLimits(workflow, state);
@@ -507,6 +646,7 @@ async function runUnit(
   let backoffs = 0;
 
   while (unit.attempts < maxAttempts) {
+    const beforeOutputs = await outputSnapshots(workspaceDir, spec.outputs);
     unit.attempts += 1;
     unit.status = "running";
     // Persist before starting work so dashboards can distinguish an active
@@ -518,6 +658,21 @@ async function runUnit(
     });
 
     const skillDocs = await loadSkillDocuments(workspaceDir, spec.skills);
+    const imagePaths = await resolveImageInputs(workspaceDir, spec.image_inputs);
+    if (spec.image_inputs.length > 0 && imagePaths.length === 0) {
+      unit.status = "failed";
+      unit.lastError = `No visual input matched: ${spec.image_inputs.join(", ")}`;
+      await appendFlowFailure(workspaceDir, {
+        stage: unitKey, attempt: unit.attempts,
+        failure_class: "deterministic_contract", code: "missing_visual_input",
+        message: unit.lastError,
+        remediation: "Render the declared image inputs for this attempt, then retry the failed unit.",
+        recoverable: true,
+      });
+      await appendEvent(workspaceDir, { type: "unit_failed", key: spec.key, reason: "missing_visual_input" });
+      await saveFlowState(workspaceDir, state);
+      return "failed";
+    }
     // Owner persona: roles/<owner>.md is the workspace-level convention for
     // giving each owner distinct instructions (LongWrite compiles its agent
     // templates into these). Absent file = owner stays a plain label.
@@ -555,17 +710,32 @@ async function runUnit(
     }, 250);
     let attemptStartedAt = Date.now();
     let result: StageRunResult;
+    let runtimeThrew = false;
     try {
-      result = await unitRuntime.runStage({
-      owner: spec.owner, instructions: prompt,
-      workspaceDir, unitKey,
-      outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
-      command: spec.command,
-      allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
-      model: requestedModel, promptPath, logPath,
-      abortSignal: abortController.signal,
-      remoteJob: unit.remoteJob,
-      });
+      try {
+        result = await unitRuntime.runStage({
+          owner: spec.owner, instructions: prompt,
+          workspaceDir, unitKey,
+          outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
+          command: spec.command,
+          allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
+          imagePaths,
+          model: requestedModel, promptPath, logPath,
+          abortSignal: abortController.signal,
+          remoteJob: unit.remoteJob,
+        });
+      } catch (error) {
+        runtimeThrew = true;
+        const message = error instanceof Error ? error.message : String(error);
+        result = { outcome: "worker_error", producedFiles: [], message: `runtime threw unexpectedly: ${message}` };
+        await appendFlowFailure(workspaceDir, {
+          stage: unitKey, attempt: unit.attempts,
+          failure_class: "unknown", code: "runtime_threw",
+          message,
+          remediation: "Inspect the attempt log and runtime adapter; convert recurring throws into a classified StageRunOutcome.",
+          recoverable: true,
+        });
+      }
     } finally {
       clearInterval(cancellationPoll);
     }
@@ -590,6 +760,7 @@ async function runUnit(
         outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
         command: spec.command,
       allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
+        imagePaths,
         model: requestedModel, promptPath, logPath,
         abortSignal: abortController.signal,
       });
@@ -634,6 +805,7 @@ async function runUnit(
           outputs: spec.outputs, timeoutMs: unitTimeoutMs(workflow),
           command: spec.command,
           allowedTools: spec.allowed_tools.length > 0 ? spec.allowed_tools : undefined,
+          imagePaths,
           model: fallbackModel, promptPath, logPath,
           abortSignal: abortController.signal,
         });
@@ -643,6 +815,7 @@ async function runUnit(
     }
 
     if (PAUSE_OUTCOMES.has(result.outcome)) {
+      const blockedAttempt = unit.attempts;
       unit.status = "pending"; // re-runnable once the blocker clears
       unit.attempts -= 1; // the blocked attempt does not count
       if (result.retryAfterMs !== undefined) {
@@ -651,6 +824,13 @@ async function runUnit(
         delete unit.retryAt;
       }
       await writeBlocker(workspaceDir, unitKey, result);
+      await appendFlowFailure(workspaceDir, {
+        stage: unitKey, attempt: blockedAttempt,
+        failure_class: runtimeFailureClass(result.outcome), code: result.outcome,
+        message: result.message ?? result.outcome,
+        remediation: "Resolve the reported provider, permission, tool, budget, or remote-job blocker, then resume the flow.",
+        recoverable: true,
+      });
       await appendEvent(workspaceDir, { type: result.outcome === "remote_pending" ? "remote_job_pending" : "flow_paused_blocker", key: unitKey, outcome: result.outcome, remoteJob: result.remoteJob });
       return "paused";
     }
@@ -661,6 +841,13 @@ async function runUnit(
       await checkpointOutputs(workspaceDir, unitKey, spec.outputs);
       unit.status = "pending";
       unit.lastError = result.message ?? "operator cancelled in-flight unit";
+      await appendFlowFailure(workspaceDir, {
+        stage: unitKey, attempt: unit.attempts,
+        failure_class: "operator_state", code: "operator_cancelled",
+        message: unit.lastError,
+        remediation: "Resume the cancelled flow when the operator is ready; completed checkpoints remain preserved.",
+        recoverable: true,
+      });
       state.status = "cancelled";
       await appendEvent(workspaceDir, { type: "flow_cancelled_operator", key: unitKey, in_flight: true });
       await saveFlowState(workspaceDir, state);
@@ -670,14 +857,25 @@ async function runUnit(
     if (result.outcome === "success") {
       delete unit.retryAt;
       const report = await runValidators(spec.validators, spec.outputs, workspaceDir, spec.validator_commands);
+      report.findings.push(...(await staleAttemptFindings(workspaceDir, spec.outputs, spec.allow_unchanged_outputs, beforeOutputs)));
+      report.pass = report.findings.length === 0;
       await appendValidationReport(workspaceDir, unitKey, report.findings, report.pass);
       if (report.pass) {
         unit.status = "succeeded";
+        await writeAttemptReceipt(workspaceDir, state, unitKey, unitRuntime.id, spec.outputs);
         await appendEvent(workspaceDir, { type: "unit_succeeded", key: unitKey, usage: result.usage });
         return "succeeded";
       }
       retryFeedback = report.findings;
       unit.lastError = report.findings.join("; ");
+      await appendFlowFailure(workspaceDir, {
+        stage: unitKey, attempt: unit.attempts,
+        failure_class: validationFailureClass(unitRuntime.id, report.findings),
+        code: report.findings.some((finding) => finding.startsWith("stale_attempt_output")) ? "stale_attempt_output" : "validation_failed",
+        message: unit.lastError,
+        remediation: "Use the validator findings in the retry prompt and produce fresh, schema-valid outputs for this attempt.",
+        recoverable: unit.attempts < maxAttempts,
+      });
       await appendEvent(workspaceDir, {
         type: "unit_validation_failed", key: unitKey, findings: report.findings, usage: result.usage,
       });
@@ -687,6 +885,15 @@ async function runUnit(
     // worker_error / timeout / validation_failed from the runtime itself
     unit.lastError = result.message ?? result.outcome;
     retryFeedback = [result.message ?? `worker reported ${result.outcome}`];
+    if (!runtimeThrew) {
+      await appendFlowFailure(workspaceDir, {
+        stage: unitKey, attempt: unit.attempts,
+        failure_class: runtimeFailureClass(result.outcome), code: result.outcome,
+        message: unit.lastError,
+        remediation: "Inspect the attempt log, repair the runtime/environment condition, and retry or resume according to the recorded outcome.",
+        recoverable: unit.attempts < maxAttempts,
+      });
+    }
     await appendEvent(workspaceDir, { type: "unit_attempt_failed", key: unitKey, outcome: result.outcome, usage: result.usage });
   }
 
@@ -767,7 +974,9 @@ function stageToSpec(stage: StandardStage): WorkUnitSpec {
     owner: stage.owner,
     inputs: stage.inputs,
     optional_inputs: stage.optional_inputs,
+    image_inputs: stage.image_inputs,
     outputs: stage.outputs,
+    allow_unchanged_outputs: stage.allow_unchanged_outputs,
     tools: stage.tools,
     allowed_tools: stage.allowed_tools,
     instructions: stage.instructions,
@@ -827,7 +1036,9 @@ function actionToSpec(dispatch: ActionDispatchStage, action: WorkflowAction, pla
     owner: action.owner,
     inputs: [...action.inputs, dispatch.plan_path],
     optional_inputs: action.optional_inputs,
+    image_inputs: action.image_inputs,
     outputs: action.outputs,
+    allow_unchanged_outputs: action.allow_unchanged_outputs,
     tools: action.tools,
     allowed_tools: action.allowed_tools,
     instructions: [
@@ -990,7 +1201,9 @@ function stepToSpec(stage: ForeachStage, step: WorkflowStep, itemId: string): Wo
     owner: step.owner,
     inputs: step.inputs.map(mapPath),
     optional_inputs: step.optional_inputs.map(mapPath),
+    image_inputs: step.image_inputs.map(mapPath),
     outputs: step.outputs.map(mapPath),
+    allow_unchanged_outputs: step.allow_unchanged_outputs.map(mapPath),
     tools: step.tools,
     allowed_tools: step.allowed_tools,
     instructions: step.instructions,
@@ -1298,6 +1511,7 @@ async function runLoopStage(
       maxRounds: stage.max_rounds,
     });
 
+    let roundFailed = false;
     for (const child of stage.stages) {
       const scoped = scopeExecutableStage(child, `${roundPrefix}-${child.id}`);
       const outcome = await runExecutableStage(scoped, opts, state, runtimeMaxConcurrent);
@@ -1314,7 +1528,12 @@ async function runLoopStage(
             type: "loop_child_failed_continuing", key: scoped.id,
             round: roundNumber, remainingRounds: stage.max_rounds - unit.rounds - 1,
           });
-          break; // end this round; the round-complete logic advances the loop
+          // This is an incomplete round: its score/review artifact may be
+          // stale from the preceding successful round. Advance to the next
+          // bounded recovery attempt, but never evaluate stop/stagnation on
+          // stale metrics or count this as a completed quality review.
+          roundFailed = true;
+          break;
         }
         unit.status = "failed";
         return "failed";
@@ -1339,6 +1558,8 @@ async function runLoopStage(
       key: stage.id,
       round: unit.rounds,
     });
+
+    if (roundFailed) continue;
 
     if (stage.stop_when) {
       const evaluation = await evaluateStopCondition(opts.workspaceDir, stage.stop_when);
@@ -1427,9 +1648,47 @@ async function runLoopStage(
 
 /** One flow run per workspace: acquire the shared lock for the duration. */
 export async function runFlow(opts: RunFlowOptions): Promise<FlowState> {
-  const lock = await acquireFlowLock(opts.workspaceDir, opts.lockHolder ?? "cli");
+  let lock: Awaited<ReturnType<typeof acquireFlowLock>>;
+  try {
+    lock = await acquireFlowLock(opts.workspaceDir, opts.lockHolder ?? "cli");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await appendFlowFailure(opts.workspaceDir, {
+      stage: "flow", failure_class: error instanceof FlowLockHeldError ? "operator_state" : "unknown",
+      code: error instanceof FlowLockHeldError ? "workspace_locked" : "lock_acquisition_failed",
+      message,
+      remediation: error instanceof FlowLockHeldError
+        ? "Use the existing CLI/dashboard run, or stop and recover it before starting another run."
+        : "Inspect filesystem permissions and the flow lock record before retrying.",
+      recoverable: true,
+    }).catch(() => undefined);
+    throw error;
+  }
   try {
     return await runFlowUnlocked(opts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const failureClass = /workflow definition changed|flow is .*resume|flow state exists but is invalid/i.test(message)
+      ? "operator_state"
+      : /capability mismatch/i.test(message)
+        ? "deterministic_contract"
+        : /runtime .*not available/i.test(message)
+          ? "external_environment"
+          : "unknown";
+    await appendFlowFailure(opts.workspaceDir, {
+      stage: "flow", failure_class: failureClass,
+      code: failureClass === "operator_state" ? "flow_state_conflict"
+        : failureClass === "deterministic_contract" ? "runtime_capability_mismatch"
+          : failureClass === "external_environment" ? "runtime_unavailable" : "unclassified_flow_error",
+      message,
+      remediation: failureClass === "operator_state"
+        ? "Follow the reported resume, migrate, recover, or reset instruction before retrying."
+        : failureClass === "deterministic_contract"
+          ? "Fix the workflow/runtime contract and re-run preflight."
+          : "Inspect the flow event log and runtime health, then classify recurring failures explicitly.",
+      recoverable: true,
+    }).catch(() => undefined);
+    throw error;
   } finally {
     await releaseFlowLock(opts.workspaceDir, lock);
   }

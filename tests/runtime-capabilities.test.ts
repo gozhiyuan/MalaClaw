@@ -32,6 +32,7 @@ describe("runtime capability declarations", () => {
   it("declares the alpha runtime matrix roles", () => {
     expect(getWorkerRuntime("claude-code").capabilities.cli_harness_tools).toBe(true);
     expect(getWorkerRuntime("codex").capabilities.multi_file_edit).toBe(true);
+    expect(getWorkerRuntime("codex").capabilities.image_input).toBe(true);
     expect(getWorkerRuntime("anthropic-api").capabilities).toMatchObject({
       single_output: true,
       multi_file_edit: false,
@@ -66,6 +67,15 @@ describe("findCapabilityMismatches", () => {
     const findings = findCapabilityMismatches(wf, "dry-run");
     expect(findings.some((f) => f.includes("harness"))).toBe(true);
     expect(findings.some((f) => f.includes('unknown runtime "not-a-runtime"'))).toBe(true);
+  });
+
+  it("fails closed when a visual-input stage targets a non-multimodal runtime", () => {
+    const wf = WorkflowDef.parse({
+      stages: [{ id: "visual", owner: "reviewer", runtime: "dry-run", image_inputs: ["reports/page.png"], outputs: ["review.md"] }],
+    });
+    expect(findCapabilityMismatches(wf, "dry-run")).toEqual(expect.arrayContaining([
+      expect.stringContaining("image_inputs requires a runtime with image-input support"),
+    ]));
   });
 
   it("passes clean workflows including loops and foreach", () => {
@@ -137,6 +147,29 @@ describe("stage skills and allowed_tools", () => {
     expect(state.status).toBe("completed");
     expect(seen[0].allowedTools).toEqual(["Bash", "WebSearch"]);
     expect(seen[0].instructions).toContain("Short sentences.");
+  });
+
+  it("expands visual image globs and passes absolute attachments to a multimodal runtime", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "reports", "visual-review"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reports", "visual-review", "page-003.png"), "not-a-real-png", "utf8");
+    const seen: string[][] = [];
+    const inner = new DryRunRuntime();
+    const multimodal = {
+      id: "codex",
+      capabilities: { ...inner.capabilities, image_input: true },
+      checkAvailable: () => inner.checkAvailable(),
+      runStage: async (req: Parameters<DryRunRuntime["runStage"]>[0]) => {
+        seen.push(req.imagePaths ?? []);
+        return inner.runStage(req);
+      },
+    };
+    const wf = WorkflowDef.parse({
+      stages: [{ id: "visual", owner: "reviewer", runtime: "codex", image_inputs: ["reports/visual-review/*.png"], outputs: ["review.md"] }],
+    });
+    const state = await runFlow({ workflow: wf, workspaceDir: ws, runtime: multimodal });
+    expect(state.status).toBe("completed");
+    expect(seen).toEqual([[path.join(ws, "reports", "visual-review", "page-003.png")]]);
   });
 
   it("expands skill globs and foreach skill templates before rendering", async () => {

@@ -49,6 +49,7 @@ describe("flow state", () => {
     const loaded = await loadFlowState(ws);
     expect(loaded?.units.plan.status).toBe("succeeded");
     expect(loaded?.status).toBe("running");
+    expect((await fs.readdir(flowDir(ws))).filter((entry) => entry.includes(".tmp-"))).toEqual([]);
   });
 
   it("returns null when no state exists", async () => {

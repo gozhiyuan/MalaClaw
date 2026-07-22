@@ -78,4 +78,12 @@ describe("runValidators", () => {
     expect(fail.pass).toBe(false);
     expect(fail.findings[0]).toContain("bad citations");
   });
+
+  it("allows a validator command to materialize a declared derived artifact", async () => {
+    const ws = await makeWorkspace({ "raw.json": "{}" });
+    const report = await runValidators(["required_output_exists"], ["raw.json", "normalized.json"], ws, [
+      { cmd: process.execPath, args: ["-e", "require('fs').writeFileSync('normalized.json', '{}')"] },
+    ]);
+    expect(report.pass).toBe(true);
+  });
 });

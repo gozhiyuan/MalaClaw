@@ -15,6 +15,8 @@ export type RuntimeCapabilities = {
   provider_tool_calling: boolean;
   /** Full CLI harness: shell tools, file tools, skills, MCP. */
   cli_harness_tools: boolean;
+  /** Can attach workspace image files to a worker prompt as visual input. */
+  image_input?: boolean;
 };
 
 export type RuntimeHealth = {
@@ -37,6 +39,8 @@ export type StageRunRequest = {
   /** Stage-granted harness tools (claude-code --allowedTools). Additive to
    *  the runtime's safe defaults; ignored by non-harness runtimes. */
   allowedTools?: string[];
+  /** Absolute image paths supplied as first-class visual prompt inputs. */
+  imagePaths?: string[];
   timeoutMs: number;
   /** Set by the engine for a confirmed operator cancellation. Runtimes must
    * terminate their child process and return the `cancelled` outcome. */

@@ -329,7 +329,14 @@ const workUnitFields = {
   // Used if present, never required: exempt from the engine's input-existence
   // check (future milestone) and from input-provenance warnings.
   optional_inputs: z.array(workspacePath).default([]),
+  // Binary visual artifacts attached to a multimodal worker as prompt images.
+  // Unlike `skills`, these are never decoded and injected into the text prompt.
+  image_inputs: z.array(workspacePath).default([]),
   outputs: z.array(workspacePath).default([]),
+  /** Explicit pass-through outputs that are allowed to remain byte-for-byte
+   * unchanged when a stage has no new information. Every other concrete
+   * output must be refreshed by the current attempt. */
+  allow_unchanged_outputs: z.array(workspacePath).default([]),
   // Advisory tool names mentioned in the stage prompt (any runtime).
   tools: z.array(z.string()).default([]),
   // Harness tool grants: maps to claude-code --allowedTools. Requires a

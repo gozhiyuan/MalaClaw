@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { createRequire } from "node:module";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 const program = new Command();
 
 program
   .name("malaclaw")
   .description("Runtime-agnostic agent team templates and installer")
-  .version("1.0.0");
+  .version(packageVersion);
 
 // ── init ─────────────────────────────────────────────────────────────────────
 

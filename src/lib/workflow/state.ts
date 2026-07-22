@@ -130,7 +130,17 @@ export async function initFlowState(workflow: WorkflowDef, workspaceDir: string)
 export async function saveFlowState(workspaceDir: string, state: FlowState): Promise<void> {
   state.updatedAt = new Date().toISOString();
   await fs.mkdir(flowDir(workspaceDir), { recursive: true });
-  await fs.writeFile(statePath(workspaceDir), JSON.stringify(state, null, 2), "utf-8");
+  // A scheduler or machine crash must leave either the previous complete
+  // snapshot or the new complete snapshot. Writing state.json in place can
+  // expose a truncated JSON document to the dashboard/recovery CLI.
+  const target = statePath(workspaceDir);
+  const temporary = `${target}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 /** Missing state = fresh workspace (null). A PRESENT but unparseable state
