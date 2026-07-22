@@ -6,13 +6,16 @@ AI assistant guide for the `malaclaw` repository. Read this before making change
 
 ## What This Repo Is
 
-`malaclaw` is a CLI tool + template library that installs pre-built multi-agent teams into OpenClaw. It is **not** a product or app. It is an orchestration layer — think of it as npm for OpenClaw agent projects.
+`malaclaw` is a workflow and runtime control plane for long-running multi-agent projects. It has two co-equal surfaces: a **flow engine** that turns a project-local `malaclaw.yaml` into a resumable workflow (state, approval gates, validators, bounded retries, loops, and worker/runtime dispatch), and **provisioning adapters** that render/install agent-team workspaces into OpenClaw, Claude Code, Codex, and ClawTeam. It is orchestration infrastructure, not an end-user product — this repo is no longer only an OpenClaw installer.
 
 The repo provides:
 - A Node.js CLI (`malaclaw`) built on TypeScript + Commander
+- A flow engine under `src/lib/workflow/` — state, validators, loops, and worker runtimes (`dry-run`, `script`, `claude-code`, `codex`, OpenAI/Anthropic/Gemini/Ollama APIs, `remote-job`) plus supervision and an operator brief
 - Bundled agent/team/skill/pack YAML templates under `templates/` and `packs/`
 - 36+ curated starter demo project definitions under `starters/` and `demo-projects/`
 - A `skills/malaclaw-cook/` skill that can be installed into OpenClaw itself
+
+The first flagship application built on the flow engine is [MrMaLiang](https://github.com/gozhiyuan/MrMaLiang) (public `maliang` CLI); MalaClaw owns the durable execution, MrMaLiang owns the writing/research product logic.
 
 ---
 

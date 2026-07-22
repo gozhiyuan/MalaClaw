@@ -8,9 +8,13 @@ state, approval gates, validators, bounded retries, foreach fanout, loop
 groups, and pluggable workers such as Claude Code, Codex, deterministic
 scripts, and OpenAI-compatible chat servers.
 
-The first flagship consumer is LongWrite Agent: an AutoResearch-style long-form
-writing workflow that uses MalaClaw for orchestration and worker runtime
-dispatch.
+The first flagship application is
+[MrMaLiang](https://github.com/gozhiyuan/MrMaLiang): an evidence-first monorepo
+for long-form writing and computational research whose public `maliang` CLI
+compiles a project into a `malaclaw.yaml` workflow and delegates all durable
+execution to MalaClaw. Its internal components — LongWrite (writing) and
+LongExperiment (controlled experiments) — use MalaClaw for orchestration and
+worker runtime dispatch.
 
 ## What It Is
 
@@ -37,7 +41,8 @@ an OpenClaw installer.
 | --- | --- |
 | Workflow manifests | Declarative `workflow:` stages with owners, inputs, outputs, tools, validators, approvals, foreach item pipelines, loop groups, and runtime/model overrides. |
 | Flow engine | Resumable execution with `.malaclaw/flow/state.json`, event logs, checkpoints, retry handling, approval queues, and blocker reports. |
-| Worker runtimes | `dry-run`, `script`, `claude-code`, `codex`, `openai-compatible`, and `openai-api`. |
+| Worker runtimes | `dry-run`, `script`, `claude-code`, `codex`, `openai-compatible`/`openai-api`, `ollama`, `anthropic-api`, `gemini-api`, and `remote-job`. |
+| Remote jobs & supervision | `remote-job` bridges workspace-owned external adapters; `flow supervise` retries blockers with backoff and polls approvals (never auto-approves); `flow operator-brief` prints a provider-neutral status brief. |
 | Runtime checks | `malaclaw flow runtimes` checks worker availability without spending model quota. |
 | Runtime smoke/eval | `malaclaw flow smoke-runtime --runtime <id>` runs a one-stage workflow and writes a Markdown report. |
 | Deterministic tools | `script` stages run structured commands without shell interpolation. |
@@ -135,6 +140,7 @@ malaclaw flow run --runtime codex
 | `ollama` | Free local single-output text stages | `openai-compatible` preset for `http://127.0.0.1:11434/v1`. |
 | `anthropic-api` | Hosted Claude single-output text stages | Anthropic Messages API; needs `ANTHROPIC_API_KEY`. |
 | `gemini-api` | Hosted Gemini single-output text stages | `generateContent` API; needs `GEMINI_API_KEY`. |
+| `remote-job` | Long-running external jobs (remote GPUs, batch queues) | Bridges to a workspace-owned adapter via one JSON request/response (`submit`/`status`/`collect`/`cancel`); the engine owns the persisted job handle, and provider credentials never enter state or telemetry. |
 
 API runtime environment variables:
 
@@ -190,27 +196,31 @@ malaclaw install --dry-run
 malaclaw install
 ```
 
-## LongWrite Relationship
+## MrMaLiang Relationship
 
-LongWrite is the writing product layer. MalaClaw is the runtime layer.
+[MrMaLiang](https://github.com/gozhiyuan/MrMaLiang) is the application layer;
+MalaClaw is the runtime layer. Its public `maliang` CLI compiles a project into a
+`malaclaw.yaml` workflow and hands execution to MalaClaw. LongWrite (writing) and
+LongExperiment (controlled experiments) are its internal components.
 
 ```text
-LongWrite mode/config
-  -> longwrite init
+MrMaLiang project (paper.survey / paper.empirical / novel / technical-book)
+  -> maliang init
   -> longwrite.yaml + malaclaw.yaml
   -> malaclaw validate
   -> malaclaw flow run
   -> artifacts, reviews, reports, approvals
 ```
 
-MalaClaw deliberately does not own writing-specific concepts such as citation
-plans, novel bibles, or manuscript validation. It owns generic workflow
-execution.
+MalaClaw deliberately does not own application-specific concepts such as citation
+plans, novel bibles, manuscript validation, or experiment audits. It owns generic
+workflow execution: state, retries, approvals, validators, loops, and runtime
+dispatch.
 
-For LongWrite's full manual research flagship, including installation,
-dashboard setup, worker credentials, optional research/image API keys,
-approvals, quota supervision, and release artifacts, see the Agentic Survey
-Flagship Guide in the sibling MrMaLiang checkout.
+For MrMaLiang's full manual research flagship — installation, dashboard setup,
+worker credentials, optional research/image API keys, approvals, quota
+supervision, and release artifacts — see the Agentic Survey Flagship Guide in the
+[MrMaLiang](https://github.com/gozhiyuan/MrMaLiang) repository.
 
 ## Useful Commands
 
@@ -223,6 +233,9 @@ malaclaw flow approve <approval-id>
 malaclaw flow report
 malaclaw flow review --batch
 malaclaw flow continue
+malaclaw flow reopen <stage-id>
+malaclaw flow operator-brief
+malaclaw flow supervise
 malaclaw flow runtimes
 malaclaw flow smoke-runtime --runtime codex
 
@@ -250,9 +263,9 @@ you intentionally want LAN access, and pair it with `--auth-token <token>` when
 other machines can reach the port.
 
 The dashboard includes a Flow monitor for active workflow runs and supports
-product-specific extensions. LongWrite is the first alpha extension, but it is
-not a core dashboard dependency: LongWrite owns its routes and product tab under
-`MrMaLiang/packages/longwrite/dashboard-extension`.
+product-specific extensions. MrMaLiang's LongWrite component is the first alpha
+extension, but it is not a core dashboard dependency: it owns its routes and
+product tab under `MrMaLiang/packages/longwrite/dashboard-extension`.
 
 When the MalaClaw dashboard is built from a checkout that has
 `../MrMaLiang`, the LongWrite client tab is included in the built
@@ -288,9 +301,9 @@ dashboard/                 # optional web dashboard
 docs/                      # current docs and archived implementation plans
 ```
 
-## Current MVP Status
+## Status
 
-Implemented:
+Shipped in the 1.x line. Implemented:
 
 - strict workflow schema and semantic validation,
 - file-backed flow state and event logs,
@@ -302,9 +315,12 @@ Implemented:
 - real worker runtimes for Claude Code and Codex,
 - deterministic `script` runtime,
 - OpenAI-compatible single-output runtime,
+- hosted API runtimes (`anthropic-api`, `gemini-api`, `ollama`),
+- `remote-job` runtime bridge for external adapters,
+- flow supervision with backoff plus a provider-neutral operator brief,
 - runtime smoke/eval reports.
 
-Still intentionally post-MVP:
+Still intentionally out of scope for now:
 
 - arbitrary DAG scheduling,
 - automatic OS scheduler installation,
